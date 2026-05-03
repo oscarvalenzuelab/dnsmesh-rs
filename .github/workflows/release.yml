@@ -269,7 +269,15 @@ jobs:
           set -euo pipefail
           stage="dnsmesh-sdk-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/$stage"
-          cp "target/${{ matrix.target }}/release/libdnsmesh_ffi.${{ matrix.dylib_ext }}" "dist/$stage/"
+          # On musl, cdylib production is silently skipped by the Rust
+          # toolchain because the default `crt-static` target feature
+          # forces every artifact to static-link. Disabling it would
+          # break the CLI's fully-static guarantee, so the musl SDK
+          # ships static-only (`.a`). Consumers wanting a dynamic
+          # library should build against glibc.
+          if [ "${{ matrix.target }}" != 'x86_64-unknown-linux-musl' ]; then
+            cp "target/${{ matrix.target }}/release/libdnsmesh_ffi.${{ matrix.dylib_ext }}" "dist/$stage/"
+          fi
           cp "target/${{ matrix.target }}/release/libdnsmesh_ffi.a" "dist/$stage/"
           cp LICENSE README.md "dist/$stage/"
           tar -C dist -czf "dist/${stage}.tar.gz" "$stage"
