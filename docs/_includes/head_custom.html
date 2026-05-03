@@ -1,0 +1,9 @@
+{% comment %}
+  Just-the-Docs ships an empty `head_custom.html` that gets injected
+  into every page's `<head>`. Drop site-wide CSS overrides here.
+  Hides the `<hr>` separator the default layout drops between page
+  content and the per-page footer row when no footer_content is set.
+{% endcomment %}
+<style>
+  #main-content > hr { display: none; }
+</style>

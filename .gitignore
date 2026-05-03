@@ -1,0 +1,41 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# Cargo.lock IS tracked: this workspace ships a binary (dnsmesh-cli),
+# so we commit Cargo.lock for reproducible builds. Do NOT ignore it.
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Agent / assistant context — not committed
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+.aider*
+.aider.conf.yml
+superpower-docs/
+*.planning.md
+**/scratch/
+
+# Local override files
+*.local.toml
+.env.local
+.env
+
+# FFI generated bindings (regenerated per build)
+bindings/kotlin/
+bindings/swift/
+bindings/python/
+
+# Profiling / coverage
+coverage/
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*

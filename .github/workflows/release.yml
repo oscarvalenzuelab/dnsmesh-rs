@@ -1,0 +1,314 @@
+name: Release
+
+# Fires on `cli-v*` (CLI binary release) or `sdk-v*` (FFI dylib/staticlib release)
+# tags. Both produce the same per-target build; the tag prefix only controls which
+# tarballs are uploaded so consumers can pin independently.
+on:
+  push:
+    tags:
+      - "cli-v*"
+      - "sdk-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Single-shot pre-flight: extract the version from the tag, compare against
+  # workspace.version in Cargo.toml, and fail loudly if they disagree. This
+  # protects against tagging `cli-v0.2.0` while Cargo still says `0.1.0`.
+  validate:
+    name: validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      kind: ${{ steps.extract.outputs.kind }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Extract version from tag
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          # Tag pattern: <kind>-v<semver>; lifted from the Python publish-binaries.yml
+          if [[ "$tag" =~ ^(cli|sdk)-v([0-9]+\.[0-9]+\.[0-9]+([-+].+)?)$ ]]; then
+            kind="${BASH_REMATCH[1]}"
+            version="${BASH_REMATCH[2]}"
+          else
+            echo "::error::tag '$tag' does not match <cli|sdk>-v<semver>"
+            exit 1
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag (kind=$kind, version=$version)"
+
+      - name: Confirm workspace.version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          ws_version="$(cargo metadata --no-deps --format-version=1 \
+            | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="dnsmesh-cli"))')"
+          tag_version="${{ steps.extract.outputs.version }}"
+          if [[ "$ws_version" != "$tag_version" ]]; then
+            echo "::error::tag version $tag_version does not match workspace.version $ws_version"
+            exit 1
+          fi
+          echo "OK: workspace.version=$ws_version matches tag"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      KIND: ${{ needs.validate.outputs.kind }}
+      # Job-level env keeps only *boolean presence flags* — never the secret
+      # values themselves. Step `if:` expressions can't read the secrets
+      # context directly, so we bridge through booleans here. The actual
+      # secrets are mapped into env only on the specific signing steps that
+      # need them, so unrelated third-party actions (rust-cache, gh-release,
+      # cargo-zigbuild install, etc.) never see them.
+      HAS_APPLE_CERT: ${{ secrets.APPLE_DEVELOPER_ID_CERT_NAME != '' }}
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_AUTHENTICODE_CERT != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+            host_runs: true
+            dylib_ext: so
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+            host_runs: false
+            dylib_ext: so
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: false
+            host_runs: true
+            dylib_ext: so
+          - target: x86_64-apple-darwin
+            os: macos-13
+            cross: false
+            host_runs: true
+            dylib_ext: dylib
+          - target: aarch64-apple-darwin
+            os: macos-14
+            cross: false
+            host_runs: true
+            dylib_ext: dylib
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+            host_runs: true
+            dylib_ext: dll
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            cross: true
+            host_runs: false
+            dylib_ext: dll
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # musl on linux requires the musl-tools apt package for the linker.
+      - name: Install musl-tools (linux musl only)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # aarch64-linux-gnu cross compile. We use cargo-zigbuild because zig's
+      # built-in cross linker handles glibc versioning cleanly without a
+      # custom Docker image (which `cross` would require here). Zig is
+      # preinstalled on ubuntu-latest via setup-action; cargo-zigbuild is a
+      # single cargo install.
+      - name: Install zig + cargo-zigbuild (aarch64 linux only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild (aarch64 linux only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install --locked cargo-zigbuild
+
+      - name: Build (native)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build -p dnsmesh-cli -p dnsmesh-ffi --release --target ${{ matrix.target }}
+
+      # Pin the glibc floor explicitly via cargo-zigbuild's `<triple>.<version>`
+      # syntax. Default in zig 0.13 is glibc 2.28 (RHEL 8 / Ubuntu 20.04 era);
+      # we pin to 2.17 to cover CentOS 7 / Ubuntu 16.04+ since the SDK is meant
+      # to be embeddable in third-party apps with broader portability needs.
+      # If you see "GLIBC_2.x not found" errors at runtime, lower the floor
+      # further; if you need newer libc features, raise it.
+      - name: Build (cargo-zigbuild for aarch64-linux-gnu)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo zigbuild -p dnsmesh-cli -p dnsmesh-ffi --release --target aarch64-unknown-linux-gnu.2.17
+
+      # Verify the resulting binary actually targets the pinned glibc floor.
+      # `readelf -V` lists every glibc version requirement; we fail if the
+      # max is above 2.17. Keeps the floor honest if a dep starts pulling in
+      # newer libc symbols.
+      - name: Verify glibc floor (aarch64 linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y binutils-aarch64-linux-gnu
+          bin="target/${{ matrix.target }}/release/dnsmesh"
+          max_glibc="$(aarch64-linux-gnu-readelf -V "$bin" \
+            | awk '/Name: GLIBC_/ { sub(/^.*GLIBC_/,""); sub(/[^0-9.].*$/,""); print }' \
+            | sort -V | tail -1)"
+          echo "max GLIBC requirement: ${max_glibc:-none}"
+          if [[ -n "$max_glibc" ]] && \
+             [[ "$(printf '%s\n2.17' "$max_glibc" | sort -V | tail -1)" != "2.17" ]]; then
+            echo "::error::aarch64 binary requires GLIBC_${max_glibc}, exceeds pinned floor 2.17"
+            exit 1
+          fi
+
+      # Smoke-test only on hosts that can execute the binary (skip cross targets).
+      - name: Smoke test --version (unix)
+        if: matrix.host_runs && runner.os != 'Windows'
+        run: ./target/${{ matrix.target }}/release/dnsmesh --version
+
+      - name: Smoke test --version (windows)
+        if: matrix.host_runs && runner.os == 'Windows'
+        shell: pwsh
+        run: .\target\${{ matrix.target }}\release\dnsmesh.exe --version
+
+      # ---- macOS code signing (gated on cert presence; never fails) -------
+      # Wired per the unsigned-default policy in CONTRIBUTING.md. Signing turns
+      # on the moment APPLE_DEVELOPER_ID_CERT_NAME is set as a repo secret.
+      # The secret value is mapped into env *only* for this step, so other
+      # steps (rust-cache, action-gh-release, etc.) can't see it.
+      - name: Code-sign macOS binaries
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_DEVELOPER_ID_CERT_NAME: ${{ secrets.APPLE_DEVELOPER_ID_CERT_NAME }}
+        run: |
+          set -euo pipefail
+          codesign --sign "$APPLE_DEVELOPER_ID_CERT_NAME" --options runtime --timestamp \
+            ./target/${{ matrix.target }}/release/dnsmesh
+          codesign --sign "$APPLE_DEVELOPER_ID_CERT_NAME" --options runtime --timestamp \
+            ./target/${{ matrix.target }}/release/libdnsmesh_ffi.dylib
+          echo "TODO: notarization once APPLE_NOTARIZATION_USER is wired up:"
+          echo "  xcrun notarytool submit <zip> --apple-id \"\$APPLE_NOTARIZATION_USER\" \\"
+          echo "    --team-id \"\$APPLE_TEAM_ID\" --password \"\$APPLE_NOTARIZATION_PASS\" --wait"
+          echo "  xcrun stapler staple <binary>"
+
+      - name: Skip macOS code signing (no cert configured)
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT != 'true'
+        run: echo "APPLE_DEVELOPER_ID_CERT_NAME unset — shipping unsigned macOS binaries (see CONTRIBUTING.md)."
+
+      # ---- Windows code signing (gated on cert presence; never fails) -----
+      # The decoded .pfx lives only for the duration of this step. The
+      # try/finally guarantees the temp file is wiped even if signtool fails,
+      # so a failed signing run can't leave the cert on disk for a reused
+      # runner.
+      - name: Code-sign Windows binaries
+        if: runner.os == 'Windows' && env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_AUTHENTICODE_CERT: ${{ secrets.WINDOWS_AUTHENTICODE_CERT }}
+          WINDOWS_AUTHENTICODE_PASS: ${{ secrets.WINDOWS_AUTHENTICODE_PASS }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cert = "$env:RUNNER_TEMP\authenticode.pfx"
+          [System.IO.File]::WriteAllBytes($cert, [System.Convert]::FromBase64String($env:WINDOWS_AUTHENTICODE_CERT))
+          try {
+            $bin = "target\${{ matrix.target }}\release\dnsmesh.exe"
+            $dll = "target\${{ matrix.target }}\release\dnsmesh_ffi.dll"
+            signtool sign /f $cert /p $env:WINDOWS_AUTHENTICODE_PASS `
+              /tr http://timestamp.digicert.com /td sha256 /fd sha256 $bin
+            signtool sign /f $cert /p $env:WINDOWS_AUTHENTICODE_PASS `
+              /tr http://timestamp.digicert.com /td sha256 /fd sha256 $dll
+          } finally {
+            Remove-Item $cert -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Skip Windows code signing (no cert configured)
+        if: runner.os == 'Windows' && env.HAS_WIN_CERT != 'true'
+        run: echo "WINDOWS_AUTHENTICODE_CERT unset — shipping unsigned Windows binaries (see CONTRIBUTING.md)."
+
+      # ---- Package -----------------------------------------------------------
+      - name: Package CLI tarball (unix)
+        if: runner.os != 'Windows' && env.KIND == 'cli'
+        run: |
+          set -euo pipefail
+          stage="dnsmesh-cli-${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/$stage"
+          cp "target/${{ matrix.target }}/release/dnsmesh" "dist/$stage/"
+          cp LICENSE README.md "dist/$stage/"
+          tar -C dist -czf "dist/${stage}.tar.gz" "$stage"
+          ls -la dist/
+
+      - name: Package SDK tarball (unix)
+        if: runner.os != 'Windows' && env.KIND == 'sdk'
+        run: |
+          set -euo pipefail
+          stage="dnsmesh-sdk-${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/$stage"
+          cp "target/${{ matrix.target }}/release/libdnsmesh_ffi.${{ matrix.dylib_ext }}" "dist/$stage/"
+          cp "target/${{ matrix.target }}/release/libdnsmesh_ffi.a" "dist/$stage/"
+          cp LICENSE README.md "dist/$stage/"
+          tar -C dist -czf "dist/${stage}.tar.gz" "$stage"
+          ls -la dist/
+
+      - name: Package CLI archive (windows)
+        if: runner.os == 'Windows' && env.KIND == 'cli'
+        shell: pwsh
+        run: |
+          $stage = "dnsmesh-cli-$env:VERSION-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist\$stage" | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\dnsmesh.exe" "dist\$stage\"
+          Copy-Item LICENSE,README.md "dist\$stage\"
+          Compress-Archive -Path "dist\$stage\*" -DestinationPath "dist\$stage.zip"
+          Get-ChildItem dist
+
+      - name: Package SDK archive (windows)
+        if: runner.os == 'Windows' && env.KIND == 'sdk'
+        shell: pwsh
+        run: |
+          $stage = "dnsmesh-sdk-$env:VERSION-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist\$stage" | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\dnsmesh_ffi.dll" "dist\$stage\"
+          Copy-Item "target\${{ matrix.target }}\release\dnsmesh_ffi.lib" "dist\$stage\"
+          Copy-Item LICENSE,README.md "dist\$stage\"
+          Compress-Archive -Path "dist\$stage\*" -DestinationPath "dist\$stage.zip"
+          Get-ChildItem dist
+
+      # action-gh-release pinned to the v2.6.2 SHA — major-tag drift could
+      # silently inject changed behavior on the runner that already holds
+      # GITHUB_TOKEN. Bump deliberately when a new version is wanted.
+      - name: Upload to GH Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip

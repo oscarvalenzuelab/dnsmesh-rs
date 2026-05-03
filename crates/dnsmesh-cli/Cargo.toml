@@ -1,0 +1,71 @@
+[package]
+name = "dnsmesh-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "DMP command-line interface."
+
+[[bin]]
+name = "dnsmesh"
+path = "src/main.rs"
+
+[dependencies]
+dnsmesh-core = { path = "../dnsmesh-core" }
+# Cloudflare HTTP-publisher feature is on by default at the CLI: most
+# operators picking the CLI either run their own BIND with TSIG or use
+# Cloudflare's hosted zones, so carrying both in the binary is the
+# common case. The mobile FFI keeps it off (Cloudflare publish doesn't
+# fit mobile threat models).
+dnsmesh-net = { path = "../dnsmesh-net", features = ["cloudflare"] }
+dnsmesh-storage = { path = "../dnsmesh-storage" }
+dnsmesh-client = { path = "../dnsmesh-client" }
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-std", "io-util"] }
+mail-parser = "0.10"
+maildir = "0.6"
+serde = { version = "1", features = ["derive"] }
+# Used by client_factory to (de)serialize the in-memory test-store
+# snapshot when DMP_TEST_INMEMORY_STORE_FILE is set. Test-backdoor
+# only — production code paths never touch it.
+serde_json = "1"
+serde_yaml = "0.9"
+indicatif = "0.17"
+rpassword = "7"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hex = "0.4"
+base64 = "0.22"
+# Used by client_factory's read_cloudflare_token to keep the on-disk
+# token bytes in a buffer that scrubs itself on drop. The token also
+# lives behind Zeroizing<String> in the publisher config; this is the
+# matching first-mile hygiene step.
+zeroize = "1"
+# Used by commands/register.rs for the multi-tenant-node onboarding
+# challenge/confirm dance against /v1/registration/{challenge,confirm,
+# tsig-confirm}. Sharing the rustls-backed reqwest already pulled by
+# dnsmesh-net's cloudflare feature so this doesn't grow the dep
+# graph — declared here for the explicit call sites.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# init generates a per-identity Argon2id salt so re-deriving the
+# identity bytes is deterministic across machines that share the
+# passphrase. getrandom is the platform OS RNG used by the rest of
+# the workspace via rand_core; pulled directly here to avoid the
+# rand_core layer.
+getrandom = "0.2"
+# Used by client_factory's debug-only test-store backdoor for atomic
+# tempfile + rename writes. The cfg(debug_assertions) gate excludes the
+# call site from release artifacts; the dep itself is small enough that
+# carrying it unconditionally is cheaper than juggling a feature flag.
+tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[lints]
+workspace = true

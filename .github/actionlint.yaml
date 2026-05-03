@@ -1,0 +1,7 @@
+self-hosted-runner:
+  # `macos-13` is GitHub's x86_64 Intel macOS runner. Standard free-tier
+  # availability was deprecated Dec 2024; the label still routes to a runner
+  # (now via the macos-13-large pool on Pro/Team). Listed here so actionlint's
+  # outdated label list doesn't false-positive.
+  labels:
+    - macos-13

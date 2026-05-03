@@ -1,0 +1,16 @@
+-- V3: add domain column to contacts for cross-zone receive polling.
+--
+-- The Rust port's phase-2A ContactStore dropped the per-contact mesh
+-- zone on the floor — every contact was implicitly co-located in the
+-- caller's own zone. That broke interop with the Python client, which
+-- treats Contact.domain as load-bearing: receive walks each pinned
+-- contact's zone in addition to self.domain (see Python
+-- DMPClient._zones_to_poll), because the SENDER publishes manifests
+-- under the SENDER's zone (DMPClient._slot_domain defaults zone to
+-- self.domain).
+--
+-- The default of '' (empty string) preserves back-compat for rows
+-- inserted under V1/V2: client code reads an empty domain as "use the
+-- local mesh zone" (the legacy implicit behavior), so existing files
+-- migrate cleanly without forcing a re-add of every pinned contact.
+ALTER TABLE contacts ADD COLUMN domain TEXT NOT NULL DEFAULT '';

@@ -1,0 +1,84 @@
+name: Bug report
+description: Report something that isn't working as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Before you report, please check whether
+        the issue still reproduces against `main` — this project
+        moves fast and a fix may already be in flight.
+
+        **Security issues should NOT go here.** See
+        [SECURITY.md](https://github.com/oscarvalenzuelab/dnsmesh-rs/blob/main/SECURITY.md)
+        for the private reporting channel.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `dnsmesh --version` (or commit SHA / `cargo` revision if running from source).
+      placeholder: "0.1.0-dev (commit abcdef0)"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface?
+      options:
+        - CLI (`dnsmesh` binary)
+        - Client SDK (`dnsmesh-client`)
+        - Core / wire format (`dnsmesh-core`)
+        - Network transport (`dnsmesh-net`)
+        - Storage (`dnsmesh-storage`)
+        - Mobile FFI (`dnsmesh-ffi`)
+        - MUA integration (mutt / Maildir / sendmail-compat)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, config snippets, or code that triggers the bug. Minimal is better than complete.
+      placeholder: |
+        1. `dnsmesh init alice --domain dmp.example.com --node example.com`
+        2. `dnsmesh register --node example.com`
+        3. `dnsmesh identity publish`
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: |
+        Paste error messages, stack traces, or log output verbatim.
+        Strip or redact anything sensitive (TSIG secrets,
+        passphrases, bearer tokens, internal IPs you don't want
+        public).
+
+        For tracing output, re-run with `RUST_LOG=dnsmesh=debug`
+        and include the relevant block.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        OS + `rustc --version` + `cargo --version`. For node-facing
+        bugs, include the publisher (TSIG / Cloudflare / node-token)
+        and any relevant config (with secrets redacted).
+      placeholder: |
+        macOS 14.5, rustc 1.83.0, cargo 1.83.0
+        Publisher: TSIG against dnsmesh.io
+        Config: ~/.dmp/config.yaml (redacted)
+    validations:
+      required: true

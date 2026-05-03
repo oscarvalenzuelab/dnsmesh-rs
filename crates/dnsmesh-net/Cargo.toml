@@ -1,0 +1,49 @@
+[package]
+name = "dnsmesh-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "DMP DNS transport, resolver glue, and network I/O."
+
+[features]
+default = []
+# Optional HTTP-API publisher targeting Cloudflare's v4 DNS records
+# endpoint. Pulls reqwest + serde_json. Off by default so callers
+# embedding the SDK on mobile (where Cloudflare publish doesn't make
+# sense — the operator runs an authoritative zone, not the device)
+# don't pay the dep cost.
+cloudflare = ["dep:reqwest", "dep:serde", "dep:serde_json"]
+
+[dependencies]
+dnsmesh-core = { path = "../dnsmesh-core" }
+hickory-resolver = "0.25"
+hickory-proto = { version = "0.25", features = ["dnssec-aws-lc-rs"] }
+hickory-client = "0.25"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+async-trait = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+parking_lot = "0.12"
+thiserror = "2"
+tracing = "0.1"
+zeroize = { version = "1", features = ["derive"] }
+# reqwest pulled with rustls-tls (pure-Rust TLS) to avoid a system-
+# OpenSSL dep — same reason the rest of the crate stays pure-Rust.
+# Optional / feature-gated so non-cloudflare consumers don't carry
+# the dep.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+hex = "0.4"
+# Cloudflare-publisher tests fake the API server with wiremock so
+# tests don't touch the real Cloudflare endpoint.
+wiremock = "0.6"
+
+[lints]
+workspace = true

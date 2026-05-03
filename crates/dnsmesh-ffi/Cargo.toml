@@ -1,0 +1,61 @@
+[package]
+name = "dnsmesh-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "DMP C ABI surface for Kotlin / Swift / Python bindings."
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "dnsmesh_ffi"
+
+[features]
+# The default-feature build (cdylib that ships to Swift / Kotlin) MUST NOT
+# include the in-process `InMemoryStore` UniFFI Object — see lib.rs for why.
+# `test-helpers` enables the `InMemoryStore` Object plus the
+# `DmpClient::new_with_shared_store` constructor so the in-crate acceptance
+# tests (and Rust-side integration callers) can wire two clients against a
+# single shared store. The `cargo test` invocation in CI passes
+# `--features test-helpers`.
+default = []
+test-helpers = []
+
+[dependencies]
+dnsmesh-core = { path = "../dnsmesh-core" }
+dnsmesh-net = { path = "../dnsmesh-net" }
+dnsmesh-storage = { path = "../dnsmesh-storage" }
+dnsmesh-client = { path = "../dnsmesh-client" }
+uniffi = { version = "0.28", features = ["bindgen-tests"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+parking_lot = "0.12"
+thiserror = "2"
+hex = "0.4"
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }
+
+[dev-dependencies]
+uniffi = { version = "0.28", features = ["bindgen-tests"] }
+
+# FFI requires `unsafe` so we can't inherit `workspace.lints` (which forbids
+# unsafe_code). Mirror the workspace clippy config here, but allow unsafe.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+# UniFFI proc-macro mode requires owned types (`String`, `Vec<u8>`) for
+# exported function arguments — the bindgen cannot lower `&str` / `&[u8]`
+# across the FFI boundary. Suppress the by-value lint at the crate level
+# so the FFI surface stays idiomatic without per-method `#[allow]`s.
+needless_pass_by_value = "allow"

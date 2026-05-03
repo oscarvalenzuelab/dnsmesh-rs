@@ -1,0 +1,14 @@
+-- V2: add consumed_at column to prekeys for the forward-secrecy fix.
+--
+-- The Python PrekeyStore had a known bug: consume() did not delete the
+-- private-key row, so a later compromise of the sqlite file could still
+-- decrypt past traffic — defeating forward secrecy. The Rust port fixes
+-- this by deleting the row on successful decrypt + commit (see
+-- prekeys::PrekeyStore::consume).
+--
+-- This column is intentionally an audit/debug aid only. The deletion
+-- in consume() is the actual security guarantee; consumed_at exists so
+-- tests and operators can spot-check that the consume() codepath was
+-- exercised. In normal operation the row is gone before consumed_at can
+-- be observed; the field is set then immediately followed by DELETE.
+ALTER TABLE prekeys ADD COLUMN consumed_at INTEGER NULL;

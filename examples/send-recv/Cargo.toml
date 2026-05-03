@@ -1,0 +1,16 @@
+[package]
+name = "dnsmesh-example-send-recv"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone workspace so this example doesn't participate in the
+# main `dnsmesh-rs` workspace. Run with `cd examples/send-recv &&
+# cargo run --release`.
+[workspace]
+
+[dependencies]
+dnsmesh-client = { path = "../../crates/dnsmesh-client" }
+dnsmesh-net = { path = "../../crates/dnsmesh-net" }
+anyhow = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

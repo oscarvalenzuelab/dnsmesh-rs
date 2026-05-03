@@ -1,0 +1,95 @@
+name: Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+
+      - name: cargo audit
+        # `--ignore` list mirrors deny.toml's [advisories].ignore; both
+        # tools are run in CI and need the same suppressions. Each ID
+        # is documented in audit.toml + deny.toml.
+        run: |
+          cargo audit --deny warnings \
+            --ignore RUSTSEC-2026-0118 \
+            --ignore RUSTSEC-2026-0119 \
+            --ignore RUSTSEC-2025-0141 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2024-0436
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny --all-features check
+
+  # Proptest-based parser-robustness fuzz suite. The harness lives in
+  # `crates/dnsmesh-core/tests/fuzz_parsers.rs` and reads `DMP_FUZZ_MAX_EXAMPLES`
+  # from the environment to size the case budget — same env var the Python
+  # source-of-truth uses (see Python `tests/fuzz/conftest.py`).
+  #
+  # Cadence mirrors the Python repo's split:
+  #   PR / push:  1000 cases  (a few seconds per parser, snappy CI)
+  #   weekly:    10000 cases  (deeper coverage, runs Mondays at 06:17 UTC)
+  fuzz:
+    name: proptest fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set fuzz budget
+        id: budget
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "cases=10000" >> "$GITHUB_OUTPUT"
+          else
+            echo "cases=1000" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run fuzz harness
+        env:
+          DMP_FUZZ_MAX_EXAMPLES: ${{ steps.budget.outputs.cases }}
+        run: cargo test -p dnsmesh-core --release --test fuzz_parsers

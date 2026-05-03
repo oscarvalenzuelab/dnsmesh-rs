@@ -1,0 +1,39 @@
+[package]
+name = "dnsmesh-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "DMP protocol primitives, crypto, and wire format."
+
+[dependencies]
+ed25519-dalek = { version = "2", features = ["fast"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+rand_core = { version = "0.6", features = ["std"] }
+base64 = "0.22"
+hex = "0.4"
+thiserror = "2"
+# Per-chunk Reed-Solomon (BCH-style, byte-compatible with Python `reedsolo`).
+# `reed-solomon-erasure` was the original pick but uses Cauchy-style erasure RS,
+# which produces a different parity layout — verified empirically.
+reed-solomon = "0.2"
+# Cross-chunk erasure coding lives in `src/erasure/fec.rs` — an in-tree
+# zfec-byte-compatible Reed-Solomon implementation. No external crate dep
+# (the upstream `zfec-rs` is GPL-3.0; we re-implemented it under MIT).
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

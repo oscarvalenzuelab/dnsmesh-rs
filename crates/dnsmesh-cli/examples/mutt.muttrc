@@ -1,0 +1,20 @@
+# Use dnsmesh as the sendmail-compatible transport.
+set sendmail = "/usr/local/bin/dnsmesh send -t"
+set use_envelope_from = yes
+
+# Tell mutt where the Maildir is. Run `dnsmesh recv --maildir ~/Mail/dmp`
+# in a cron job (or `--watch`) to deliver decrypted DMP messages there.
+#
+# `dnsmesh recv --maildir <path>` writes every decrypted message into
+# <path>/new/, the standard Maildir incoming spool. Setting `spoolfile`
+# to the same Maildir directly (no `+inbox` subfolder) is what makes mutt
+# pick up newly delivered messages.
+set folder = "~/Mail"
+set spoolfile = "+dmp"
+set mbox_type = Maildir
+
+# Optional: keep mutt's own copies under the same Maildir tree.
+# `dnsmesh recv` writes only to ~/Mail/dmp; mutt creates the sent/drafts
+# folders the first time it tries to use them.
+set record = "+dmp.sent"
+set postponed = "+dmp.drafts"

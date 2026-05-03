@@ -1,0 +1,37 @@
+# dnsmesh — example config for a Cloudflare-hosted authoritative zone.
+#
+# Drop this in ~/.dmp/config.yaml (or pass --config <path>) once you have
+# (a) a Cloudflare account whose DNS is delegated to Cloudflare for the zone
+# you want DMP to publish under, and (b) an API token scoped to
+# `Zone:DNS:Edit` on that zone.
+#
+# Generating the token:
+#   1. Cloudflare dashboard → My Profile → API Tokens → Create Token
+#   2. Pick the "Edit zone DNS" template (or create a Custom token).
+#   3. Set Permissions = Zone : DNS : Edit. Resources = Include : Specific
+#      zone : <your zone>. Anything wider (account-level, all zones) is
+#      unnecessary surface area.
+#   4. Save the token text into a file the user-only can read:
+#         echo -n 'YOUR-TOKEN-HERE' > ~/.dmp/cloudflare-token
+#         chmod 600 ~/.dmp/cloudflare-token
+#
+# Finding the zone ID: Cloudflare dashboard → your zone → "Overview" tab →
+# right sidebar, "Zone ID" (32-char hex string). NOT the human-readable
+# zone name.
+#
+# Mutually exclusive with the `publish:` (TSIG / RFC 2136) block in
+# config-tsig.yaml. If both are set, `cloudflare:` wins and a
+# tracing::warn fires at startup.
+
+username: alice
+domain: dmp.example.com
+
+# Resolvers: empty / unset = built-in well-known list (Quad9, Google, Cloudflare).
+# Override only if you need a corporate-DNS-only deployment.
+# resolvers:
+#   - 1.1.1.1
+#   - 9.9.9.9
+
+cloudflare:
+  zone_id: 0123456789abcdef0123456789abcdef
+  api_token_path: ~/.dmp/cloudflare-token

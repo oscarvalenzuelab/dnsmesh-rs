@@ -1,0 +1,60 @@
+# dnsmesh — mutt / neomutt configuration snippet.
+#
+# Drop this into ~/.muttrc (or source it from there) once you have a
+# working `dnsmesh` install with a `publish:` block in your config and
+# at least one pinned contact you want to send to.
+#
+# Pre-flight checklist BEFORE wiring this up:
+#   1. dnsmesh init <username> --domain <mesh-zone>
+#   2. dnsmesh identity publish
+#   3. dnsmesh identity refresh-prekeys
+#   4. dnsmesh identity fetch <recipient>@<mesh-zone> --add
+#
+# After that, `mutt` will compose-and-send via the dnsmesh transport
+# (sendmail-compatible, RFC 5322 stdin) and poll a Maildir tree that
+# `dnsmesh recv` populates. `notmuch` / `mbsync` / `aerc` users can
+# point at the same Maildir root.
+
+# --- send path ----------------------------------------------------------
+
+# `dnsmesh send -t` reads the full RFC 5322 message from stdin, parses
+# `To:` for the recipient, and hands the body to the SDK encryption
+# pipeline. Mutt invokes this with the composed message on stdin every
+# time you `:send`.
+set sendmail = "/usr/local/bin/dnsmesh send -t"
+
+# Mutt's default `sendmail_wait` is 0 (block until done). Bump if your
+# DNS publish path is slow — claim publishes in particular can take a
+# moment when fanning out across many provider zones.
+set sendmail_wait = 30
+
+# We don't run a local MTA queue; let mutt prompt on send failures
+# rather than silently spool to ~/dead.letter.
+unset use_8bitmime
+
+# --- receive path -------------------------------------------------------
+
+# Point at the Maildir `dnsmesh recv` populates. Run a poll loop in
+# tmux / cron / a systemd-user-timer:
+#
+#   dnsmesh recv --maildir ~/Mail/dmp --watch --interval 30
+#
+# or one-shot before composing:
+#
+#   dnsmesh recv --maildir ~/Mail/dmp --once
+set folder = "~/Mail/dmp"
+set spoolfile = "+/"
+set mbox_type = Maildir
+
+# Mutt polls the Maildir for new mail every `mail_check` seconds.
+set mail_check = 5
+
+# --- composition --------------------------------------------------------
+
+# DMP messages are end-to-end encrypted; mutt's MIME / GPG plumbing
+# isn't involved. The `From:` and `To:` headers ARE used — the
+# sendmail-compat send path pulls `To:` for the recipient.
+set realname = "<your name>"
+set from = "<your dnsmesh username>@<your mesh zone>"
+set use_from = yes
+set envelope_from = yes
