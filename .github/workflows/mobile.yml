@@ -80,11 +80,11 @@ jobs:
         with:
           key: ios-xcframework
 
-      # uniffi-bindgen-cli is shipped as a separate crate as of UniFFI 0.28.
-      # Pin to the same minor as our `uniffi` dep to keep the generated
-      # scaffolding compatible.
-      - name: Install uniffi-bindgen-cli
-        run: cargo install --locked uniffi-bindgen-cli --version ^0.28
+      # `uniffi_bindgen` (underscore form on crates.io) ships the
+      # `uniffi-bindgen` binary. Pin to the same minor as our `uniffi`
+      # dep to keep the generated scaffolding compatible.
+      - name: Install uniffi-bindgen
+        run: cargo install --locked uniffi_bindgen --version ^0.28
 
       - name: Build iOS device slice (aarch64-apple-ios)
         run: cargo build -p dnsmesh-ffi --release --target aarch64-apple-ios
@@ -225,8 +225,8 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk --version ^3
 
-      - name: Install uniffi-bindgen-cli
-        run: cargo install --locked uniffi-bindgen-cli --version ^0.28
+      - name: Install uniffi-bindgen
+        run: cargo install --locked uniffi_bindgen --version ^0.28
 
       - name: Build all Android ABIs (API 24)
         env:
