@@ -80,11 +80,11 @@ jobs:
         with:
           key: ios-xcframework
 
-      # `uniffi_bindgen` (underscore form on crates.io) ships the
-      # `uniffi-bindgen` binary. Pin to the same minor as our `uniffi`
-      # dep to keep the generated scaffolding compatible.
-      - name: Install uniffi-bindgen
-        run: cargo install --locked uniffi_bindgen --version ^0.28
+      # UniFFI 0.28+ no longer ships an installable `uniffi-bindgen`
+      # crate; we build our own thin wrapper from `dnsmesh-ffi` that
+      # calls `uniffi::uniffi_bindgen_main()` under the `cli` feature.
+      - name: Build embedded uniffi-bindgen
+        run: cargo build -p dnsmesh-ffi --features cli --bin uniffi-bindgen
 
       - name: Build iOS device slice (aarch64-apple-ios)
         run: cargo build -p dnsmesh-ffi --release --target aarch64-apple-ios
@@ -99,7 +99,7 @@ jobs:
       - name: Generate Swift bindings
         run: |
           mkdir -p bindings/swift
-          uniffi-bindgen generate \
+          ./target/debug/uniffi-bindgen generate \
             --library target/aarch64-apple-ios/release/libdnsmesh_ffi.dylib \
             --language swift \
             --out-dir bindings/swift
@@ -225,8 +225,8 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk --version ^3
 
-      - name: Install uniffi-bindgen
-        run: cargo install --locked uniffi_bindgen --version ^0.28
+      - name: Build embedded uniffi-bindgen
+        run: cargo build -p dnsmesh-ffi --features cli --bin uniffi-bindgen
 
       - name: Build all Android ABIs (API 24)
         env:
@@ -241,7 +241,7 @@ jobs:
       - name: Generate Kotlin bindings
         run: |
           mkdir -p bindings/kotlin
-          uniffi-bindgen generate \
+          ./target/debug/uniffi-bindgen generate \
             --library target/aarch64-linux-android/release/libdnsmesh_ffi.so \
             --language kotlin \
             --out-dir bindings/kotlin

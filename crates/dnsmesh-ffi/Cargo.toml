@@ -13,6 +13,15 @@ description = "DMP C ABI surface for Kotlin / Swift / Python bindings."
 crate-type = ["cdylib", "staticlib", "rlib"]
 name = "dnsmesh_ffi"
 
+# Local bindgen binary. UniFFI 0.28+ no longer ships `uniffi-bindgen` as
+# an installable cargo binary; the canonical pattern is to embed a tiny
+# wrapper in the FFI crate that calls `uniffi::uniffi_bindgen_main()`.
+# Used in CI as `cargo run -p dnsmesh-ffi --bin uniffi-bindgen --features cli -- generate ...`.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
 [features]
 # The default-feature build (cdylib that ships to Swift / Kotlin) MUST NOT
 # include the in-process `InMemoryStore` UniFFI Object — see lib.rs for why.
@@ -23,6 +32,10 @@ name = "dnsmesh_ffi"
 # `--features test-helpers`.
 default = []
 test-helpers = []
+# `cli` enables the embedded `uniffi-bindgen` binary above. Off by
+# default so consumers building only the cdylib don't pay for the
+# bindgen toolchain.
+cli = ["uniffi/cli"]
 
 [dependencies]
 dnsmesh-core = { path = "../dnsmesh-core" }

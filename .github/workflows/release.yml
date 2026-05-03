@@ -309,6 +309,9 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
+          # Single glob — matches `.tar.gz` on unix runners and `.zip`
+          # on windows. Splitting the two patterns made
+          # `fail_on_unmatched_files: true` reject a unix runner
+          # uploading just `.tar.gz` because the `.zip` pattern
+          # matched zero files.
+          files: dist/*
