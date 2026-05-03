@@ -98,11 +98,13 @@ jobs:
             cross: false
             host_runs: true
             dylib_ext: so
-          - target: x86_64-apple-darwin
-            os: macos-13
-            cross: false
-            host_runs: true
-            dylib_ext: dylib
+          # x86_64-apple-darwin is intentionally absent. macOS 13 (the
+          # last Intel-host runner image GHA offers) reached end-of-life
+          # in November 2025 and the free-tier runner pool is exhausted
+          # in practice. Every Mac sold since 2023 is arm64; Intel Macs
+          # run the aarch64 build under Rosetta. To re-add it later,
+          # restore the matrix entry pointing at `macos-13` (paid
+          # runner) or a self-hosted x86_64 macOS host.
           - target: aarch64-apple-darwin
             os: macos-14
             cross: false
