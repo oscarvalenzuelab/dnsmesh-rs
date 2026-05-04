@@ -12,8 +12,8 @@ workflow under `.github/workflows/`:
 
 | Tag prefix | Workflow | Artifacts |
 |---|---|---|
-| `cli-v<semver>` | `release.yml` | `dnsmesh` CLI binary, 6 desktop targets, packaged as `dnsmesh-cli-<version>-<triple>.{tar.gz,zip}` |
-| `sdk-v<semver>` | `release.yml` | `libdnsmesh_ffi.{so,dylib,dll}` + `libdnsmesh_ffi.a`, 6 desktop targets, packaged as `dnsmesh-sdk-<version>-<triple>.{tar.gz,zip}` |
+| `cli-v<semver>` | `release.yml` | `dnsmesh` CLI binary, 7 desktop targets, packaged as `dnsmesh-cli-<version>-<triple>.{tar.gz,zip}` |
+| `sdk-v<semver>` | `release.yml` | `libdnsmesh_ffi.{so,dylib,dll}` + `libdnsmesh_ffi.a`, 7 desktop targets, packaged as `dnsmesh-sdk-<version>-<triple>.{tar.gz,zip}` |
 | `mobile-v<semver>` | `mobile.yml` | `DnsMesh.xcframework` (iOS device + universal simulator) and `dnsmesh-ffi-<version>.aar` (four Android ABIs) plus the generated Swift / Kotlin bindings |
 
 The decoupled tags let CLI, SDK, and mobile cadences move independently — for
@@ -29,19 +29,32 @@ example, you can ship a CLI bugfix as `cli-v0.1.1` without re-cutting the SDK.
    it matches `cargo metadata`'s workspace version. A mismatch fails the
    release loudly before any build runs — fix the tag, don't fix the workflow.
 
-The 6-target desktop matrix is:
+The 7-target desktop matrix is:
 `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
 `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
-`x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`. The two cross-compiled
-targets (aarch64 linux, aarch64 windows) skip the post-build smoke test
-because the runner can't execute the binary; everything else runs
-`dnsmesh --version` as a sanity check.
+`x86_64-apple-darwin`, `x86_64-pc-windows-msvc`,
+`aarch64-pc-windows-msvc`. The two cross-compiled targets (aarch64
+linux, aarch64 windows) skip the post-build smoke test because the
+runner can't execute the binary; everything else runs `dnsmesh
+--version` as a sanity check.
 
-`x86_64-apple-darwin` is intentionally absent. macOS 13 (the last
-Intel-host runner image GHA offers) reached end-of-life in November
-2025 and the free-tier runner pool is exhausted in practice. Every
-Mac sold since 2023 is arm64; Intel Macs run the `aarch64-apple-darwin`
-binary under Rosetta with negligible perf impact for CLI workloads.
+`x86_64-apple-darwin` is **not** built by `release.yml` — the GHA
+`macos-13` free-tier runner pool is exhausted in practice and macOS
+13 itself reached end-of-life in November 2025. The release flow for
+that target is a per-tag manual step run from any Apple Silicon Mac:
+
+```sh
+# After the cli-v<version> + sdk-v<version> tags exist on github
+# (i.e. the GHA workflow has run and produced the other 6 targets):
+scripts/release-darwin-x86.sh <version>
+```
+
+The script cross-compiles to `x86_64-apple-darwin`, packages the
+tarballs with the same naming convention `release.yml` uses, and
+uploads them to the existing release pages via `gh release upload
+--clobber`. The result is byte-equivalent to what a `macos-13` GHA
+runner would have produced (same `--release` profile, same packaging,
+unsigned).
 
 `aarch64-unknown-linux-gnu` is built via `cargo zigbuild` rather than `cross`.
 Zig's linker handles glibc versioning cleanly without us needing a custom

@@ -111,12 +111,12 @@ end-to-end (no GPL transitive dependencies).
   reference interop round-trip, `cargo audit`, `cargo deny check`,
   proptest parser-robustness fuzz harness.
 - Tag-driven release workflows:
-  - `cli-v<semver>` ships the `dnsmesh` CLI binary across 6 desktop
-    targets (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
-    `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
-    `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`). Intel Macs
-    run the `aarch64-apple-darwin` build under Rosetta.
-  - `sdk-v<semver>` ships the FFI library across the same 6 targets.
+  - `cli-v<semver>` ships the `dnsmesh` CLI binary across 7 desktop
+    targets. Six are produced by the GHA matrix; `x86_64-apple-darwin`
+    is uploaded per-tag via `scripts/release-darwin-x86.sh` (the GHA
+    `macos-13` free-tier runner pool is exhausted, so the Intel Mac
+    build is a manual cross-compile from an Apple Silicon host).
+  - `sdk-v<semver>` ships the FFI library across the same 7 targets.
   - `mobile-v<semver>` ships an iOS xcframework + Android aar with
     generated Swift / Kotlin bindings.
 - `aarch64-unknown-linux-gnu` is built via `cargo zigbuild` for clean

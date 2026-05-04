@@ -49,11 +49,12 @@ Pick whichever path fits how you usually install command-line tools.
 
 Pre-built CLI binaries are published on every `cli-v<semver>` tag at
 [github.com/oscarvalenzuelab/dnsmesh-rs/releases](https://github.com/oscarvalenzuelab/dnsmesh-rs/releases).
-Six targets ship per release; pick the one matching your machine:
+Seven targets ship per release; pick the one matching your machine:
 
 | Platform | Asset |
 |---|---|
-| macOS (Apple Silicon, and Intel via Rosetta) | `dnsmesh-cli-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS — Apple Silicon | `dnsmesh-cli-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS — Intel | `dnsmesh-cli-<version>-x86_64-apple-darwin.tar.gz` |
 | Linux — x86_64, glibc | `dnsmesh-cli-<version>-x86_64-unknown-linux-gnu.tar.gz` |
 | Linux — x86_64, static (musl) | `dnsmesh-cli-<version>-x86_64-unknown-linux-musl.tar.gz` |
 | Linux — aarch64 | `dnsmesh-cli-<version>-aarch64-unknown-linux-gnu.tar.gz` |
