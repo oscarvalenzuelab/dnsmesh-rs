@@ -2,6 +2,11 @@
 target/
 **/*.rs.bk
 
+# Local release-staging output from scripts/release-darwin-x86.sh
+# (the script also uses a tmpdir for its tarballs, but it leaves
+# `target/` and a top-level `dist/` if invoked directly).
+dist/
+
 # Cargo.lock IS tracked: this workspace ships a binary (dnsmesh-cli),
 # so we commit Cargo.lock for reproducible builds. Do NOT ignore it.
 
