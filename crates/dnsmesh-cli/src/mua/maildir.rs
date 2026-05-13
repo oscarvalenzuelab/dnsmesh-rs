@@ -121,6 +121,7 @@ mod tests {
             plaintext: text.to_vec(),
             timestamp: 1_700_000_000,
             msg_id: [0xCD; 16],
+            sender_label: None,
         }
     }
 

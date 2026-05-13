@@ -31,6 +31,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use dnsmesh_core::chunking::MessageChunker;
 use dnsmesh_core::crypto::{DmpCrypto, EncryptedMessage};
+use dnsmesh_core::envelope;
 use dnsmesh_core::erasure;
 use dnsmesh_core::manifest::{SlotManifest, NO_PREKEY};
 use dnsmesh_core::message::DMPMessage;
@@ -57,12 +58,19 @@ pub struct InboxMessage {
     /// 32-byte Ed25519 verifying key of the sender, lifted verbatim
     /// from the verified [`SlotManifest`].
     pub sender_signing_pk: [u8; 32],
-    /// Decrypted plaintext.
+    /// Decrypted plaintext (after stripping any DMPv2 envelope).
     pub plaintext: Vec<u8>,
     /// Sender-supplied `ts` from the inner `DMPHeader` (Unix seconds).
     pub timestamp: u64,
     /// 16-byte message ID.
     pub msg_id: [u8; 16],
+    /// Trusted sender label in canonical `user@host` form, populated
+    /// only when the inbound DMPv2 envelope carried a `from` claim AND
+    /// that claim's resolved [`dnsmesh_core::identity::IdentityRecord`]
+    /// pinned the same `ed25519_spk` as the verified manifest. `None`
+    /// when no envelope was present, the claim failed canonicalization,
+    /// DNS lookup failed, or the resolved record's SPK did not match.
+    pub sender_label: Option<String>,
 }
 
 /// Strip the `v=dmp1;t=chunk;d=<b64>` envelope and decode the wrapped
@@ -241,9 +249,15 @@ impl DmpClient {
                         // review with `dnsmesh intro list/accept/
                         // trust/block` without us needing the original
                         // manifest still to be in DNS — chunks expire.
+                        //
+                        // `sender_label` comes from the verified DMPv2
+                        // envelope (or `None` if absent/untrusted) —
+                        // intro UI can render the canonical address
+                        // instead of forcing the user to recognize a
+                        // raw 32-byte SPK.
                         let _ = self.intro_queue.enqueue(NewIntro {
                             sender_spk: &manifest.sender_spk,
-                            sender_username: None,
+                            sender_username: decoded.sender_label.as_deref(),
                             msg_id: &manifest.msg_id,
                             payload: &decoded.plaintext,
                             expires_at: manifest.exp,
@@ -421,7 +435,7 @@ impl DmpClient {
         // is NO_PREKEY (0) we fall back to the long-term identity
         // secret; otherwise we look up the matching one-time X25519
         // private key and decrypt with it.
-        let plaintext = if manifest.prekey_id == NO_PREKEY {
+        let raw_plaintext = if manifest.prekey_id == NO_PREKEY {
             self.crypto.decrypt_message(&encrypted, Some(&aad)).ok()?
         } else {
             let prekey_sk = self.prekeys.get_private_key(manifest.prekey_id).ok()??;
@@ -437,11 +451,25 @@ impl DmpClient {
             prekey_crypto.decrypt_message(&encrypted, Some(&aad)).ok()?
         };
 
+        // Peel any DMPv2 envelope. A v1 plaintext (no prefix) is
+        // returned unchanged with `claimed_from = None`; v2 envelopes
+        // strip the wrapper and surface the canonical `from` claim for
+        // SPK-binding verification.
+        let (plaintext, claimed_from) = envelope::decode(&raw_plaintext);
+        let sender_label = match claimed_from {
+            Some(addr) => {
+                self.resolve_envelope_label(&addr, &manifest.sender_spk)
+                    .await
+            }
+            None => None,
+        };
+
         Some(InboxMessage {
             sender_signing_pk: manifest.sender_spk,
             plaintext,
             timestamp: outer.header.timestamp,
             msg_id: outer.header.message_id,
+            sender_label,
         })
     }
 }

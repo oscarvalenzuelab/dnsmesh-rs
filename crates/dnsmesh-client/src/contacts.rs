@@ -1,6 +1,7 @@
 //! Contact management — fetch a user's identity record from DNS, persist a
 //! contact to the local store, and list pinned contacts.
 
+use dnsmesh_core::envelope::canonicalize_address;
 use dnsmesh_core::identity::{identity_domain, parse_address, IdentityRecord};
 use dnsmesh_storage::{Contact as StoredContact, NewContact};
 
@@ -89,6 +90,75 @@ impl DmpClient {
             }
         }
         Err(ClientError::VerifyFailed { name })
+    }
+
+    /// Fetch the recipient's currently-advertised protocol versions.
+    ///
+    /// Looks up `id-<hash>.<contact.domain>`, parses every TXT record at
+    /// the RRset, and returns the `versions` vector from the FIRST record
+    /// whose `ed25519_spk` matches the pinned `contact.ed25519_spk`. The
+    /// SPK filter is what makes this safe — an attacker who replaces the
+    /// RRset with an unrelated record (signed under a key we haven't
+    /// pinned) cannot trick us into emitting a v2 envelope.
+    ///
+    /// Falls back to `[1]` (v1-only) on any failure: DNS error, no
+    /// matching record, or empty / malformed `versions` suffix. The
+    /// fallback is conservative — a v1 wire format always works.
+    pub(crate) async fn recipient_versions(&self, contact: &Contact) -> Vec<u8> {
+        let name = identity_domain(&contact.username, &contact.domain);
+        let Ok(Some(records)) = self.reader.query_txt_record(&name).await else {
+            return vec![1];
+        };
+        for record in &records {
+            if let Some((parsed, _sig)) = IdentityRecord::parse_and_verify(record) {
+                if parsed.ed25519_spk == contact.ed25519_spk {
+                    return if parsed.versions.is_empty() {
+                        vec![1]
+                    } else {
+                        parsed.versions
+                    };
+                }
+            }
+        }
+        vec![1]
+    }
+
+    /// Resolve a DMPv2 envelope `from` claim against the manifest's
+    /// signing key.
+    ///
+    /// Returns the canonical `user@host` form ONLY when the resolved
+    /// [`IdentityRecord`] at `id-<hash>.<host>` pins the same
+    /// `ed25519_spk` as `expected_spk`. SPK binding is what makes the
+    /// claim trustworthy — the AEAD already proved the manifest signer
+    /// could decrypt with the recipient's key, and the manifest's own
+    /// Ed25519 signature proves the SPK belongs to whoever wrote the
+    /// slot. Tying the envelope label to that same SPK closes the loop
+    /// without trusting the claim by itself.
+    ///
+    /// `None` on any failure: address fails canonicalization, DNS
+    /// lookup fails, no record matches the expected SPK, or the matched
+    /// record's username doesn't agree with the address local-part.
+    /// Failure is conservative — the message still delivers, just
+    /// without a trusted sender label. Transient DNS failures should
+    /// not poison the cache (see [`Self::recipient_versions`] for the
+    /// equivalent positive-only-cache reasoning).
+    pub(crate) async fn resolve_envelope_label(
+        &self,
+        claimed_from: &str,
+        expected_spk: &[u8; 32],
+    ) -> Option<String> {
+        let canonical = canonicalize_address(claimed_from)?;
+        let (user, host) = parse_address(&canonical)?;
+        let name = identity_domain(&user, &host);
+        let records = self.reader.query_txt_record(&name).await.ok()??;
+        for record in &records {
+            if let Some((parsed, _sig)) = IdentityRecord::parse_and_verify(record) {
+                if parsed.username == user && parsed.ed25519_spk == *expected_spk {
+                    return Some(canonical);
+                }
+            }
+        }
+        None
     }
 
     /// Pin `contact` to the local contact store.

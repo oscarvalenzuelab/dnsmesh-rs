@@ -148,5 +148,9 @@ fn intro_to_message(intro: &PendingIntro) -> Result<InboxMessage, ClientError> {
         // the closest meaningful ts the user can see in the CLI.
         timestamp: intro.received_at,
         msg_id,
+        // The intro queue stores the sender_username from the
+        // original envelope verification (see receive::receive_messages
+        // quarantine path) so promoted intros keep the same label.
+        sender_label: intro.sender_username.clone(),
     })
 }

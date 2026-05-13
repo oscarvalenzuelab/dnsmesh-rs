@@ -6,6 +6,7 @@ pub mod claim;
 pub mod cluster;
 pub mod crypto;
 pub mod ed25519_points;
+pub mod envelope;
 pub mod erasure;
 pub mod heartbeat;
 pub mod identity;

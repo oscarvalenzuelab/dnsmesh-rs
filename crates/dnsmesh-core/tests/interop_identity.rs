@@ -16,6 +16,8 @@ struct Inputs {
     ts: u64,
     username: String,
     x25519_pk_hex: String,
+    #[serde(default)]
+    versions: Option<Vec<u8>>,
 }
 
 #[allow(clippy::struct_field_names)]
@@ -25,6 +27,8 @@ struct Case {
     expected_wire_hex: String,
     #[serde(default)]
     expected_parse_username: Option<String>,
+    #[serde(default)]
+    expected_parse_versions: Option<Vec<u8>>,
     #[serde(default)]
     expected_parse_result: Option<String>,
     #[serde(default)]
@@ -80,11 +84,13 @@ fn identity_record_vectors_match_python() {
                 "{label}: crypto ed25519 pubkey must match input vector",
             );
 
+            let versions = inputs.versions.clone().unwrap_or_else(|| vec![1]);
             let record = IdentityRecord {
                 username: inputs.username.clone(),
                 x25519_pk,
                 ed25519_spk,
                 ts: inputs.ts,
+                versions,
             };
             let wire = record
                 .sign(&crypto)
@@ -115,6 +121,12 @@ fn identity_record_vectors_match_python() {
                 assert_eq!(
                     &record.username, expected_user,
                     "{label}: parsed username mismatch",
+                );
+            }
+            if let Some(expected_versions) = &case.expected_parse_versions {
+                assert_eq!(
+                    &record.versions, expected_versions,
+                    "{label}: parsed versions mismatch",
                 );
             }
         }

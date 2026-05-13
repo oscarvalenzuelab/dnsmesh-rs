@@ -12,7 +12,16 @@
 //!     || x25519_pk(32)
 //!     || ed25519_spk(32)
 //!     || ts(8)
+//!     || [optional] versions_len(1) || versions(versions_len × 1 byte)
 //! ```
+//!
+//! The optional `versions` suffix advertises the protocol versions this client
+//! supports as a receiver. Each byte is a single protocol version number;
+//! values are sorted-and-deduplicated by the writer for a canonical encoding.
+//! A record with no suffix means "v1 only" — that's how old records published
+//! before the field existed are interpreted, so adding the field is fully
+//! backward compatible. New writers omit the suffix when `versions == [1]` so
+//! a v1-only record is bit-identical to the historical format.
 //!
 //! `sig` is a 64-byte Ed25519 signature over `body`. Recipients verify against
 //! the embedded `ed25519_spk` and apply their own trust policy (TOFU, pinned
@@ -30,6 +39,12 @@ pub const RECORD_PREFIX: &str = "v=dmp1;t=identity;d=";
 pub const USERNAME_MAX: usize = 64;
 /// Length of the body timestamp field in bytes (big-endian unsigned).
 pub const TS_LEN: usize = 8;
+
+/// Protocol versions this codebase understands as a receiver. Writers
+/// pass this to [`make_record`] (or build [`IdentityRecord`] directly)
+/// to advertise full capability; the helper defaults to v1-only so the
+/// wire stays bit-identical to the pre-versions encoding.
+pub const SUPPORTED_VERSIONS: &[u8] = &[1, 2];
 
 /// Errors returned while building or parsing identity records.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +70,15 @@ pub enum IdentityError {
     /// The username bytes were not valid UTF-8.
     #[error("username is not valid utf-8")]
     InvalidUtf8,
+    /// The optional `versions` suffix had `versions_len == 0`.
+    #[error("identity body has empty versions suffix")]
+    VersionsSuffixEmpty,
+    /// The optional `versions` suffix was not sorted-and-unique.
+    #[error("identity versions must be sorted and unique")]
+    VersionsNotCanonical,
+    /// A caller-supplied `versions` slice was empty.
+    #[error("versions must include at least one entry")]
+    VersionsArgEmpty,
 }
 
 /// DNS name where `username`'s identity record lives under `base_domain`.
@@ -89,20 +113,44 @@ pub fn parse_address(address: &str) -> Option<(String, String)> {
 
 /// Build an [`IdentityRecord`] from a [`DmpCrypto`] identity and an optional timestamp.
 ///
-/// When `ts` is `None`, the current Unix time (seconds) is used.
-#[must_use]
-pub fn make_record(crypto: &DmpCrypto, username: &str, ts: Option<u64>) -> IdentityRecord {
+/// When `ts` is `None`, the current Unix time (seconds) is used. `versions`
+/// defaults to `[1]` so the wire bytes are byte-identical to the
+/// pre-versions historical encoding — pre-this-release parsers enforce a
+/// strict length check and reject any trailing suffix, so silently
+/// advertising more would break sends from un-upgraded peers. Senders that
+/// want to advertise v2 capability pass `&[1, 2]` (or use
+/// [`SUPPORTED_VERSIONS`]) explicitly.
+pub fn make_record(
+    crypto: &DmpCrypto,
+    username: &str,
+    ts: Option<u64>,
+    versions: &[u8],
+) -> Result<IdentityRecord, IdentityError> {
     let ts = ts.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs())
     });
-    IdentityRecord {
+    Ok(IdentityRecord {
         username: username.to_string(),
         x25519_pk: crypto.public_key_bytes(),
         ed25519_spk: crypto.signing_public_key_bytes(),
         ts,
+        versions: normalize_versions(versions)?,
+    })
+}
+
+/// Sort + dedupe a versions slice. Empty input rejects — callers that
+/// mean "v1 only" must pass `&[1]` explicitly, so a typo can't silently
+/// produce a record that advertises nothing.
+pub fn normalize_versions(versions: &[u8]) -> Result<Vec<u8>, IdentityError> {
+    if versions.is_empty() {
+        return Err(IdentityError::VersionsArgEmpty);
     }
+    let mut out: Vec<u8> = versions.to_vec();
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
 }
 
 /// A signed claim that `(username, x25519_pk, ed25519_spk)` belong together.
@@ -116,10 +164,21 @@ pub struct IdentityRecord {
     pub ed25519_spk: [u8; ED25519_KEY_LEN],
     /// Unix seconds at publication.
     pub ts: u64,
+    /// Protocol versions the publisher supports as a receiver. A missing
+    /// suffix on the wire is interpreted as `vec![1]`. The encoder omits
+    /// the suffix when this equals `vec![1]` so the wire stays
+    /// bit-identical to the pre-versions encoding.
+    pub versions: Vec<u8>,
 }
 
 impl IdentityRecord {
     /// Serialize the body into the wire layout described in the module docs.
+    ///
+    /// Only emits the `versions` suffix when this record advertises
+    /// something beyond v1. Omitting it for v1-only records keeps the
+    /// wire bit-identical to the pre-versions historical encoding —
+    /// old verifiers and pre-versions body-hash caches continue to
+    /// round-trip unchanged.
     pub fn to_body_bytes(&self) -> Result<Vec<u8>, IdentityError> {
         let name = self.username.as_bytes();
         if name.is_empty() {
@@ -131,18 +190,36 @@ impl IdentityRecord {
                 max: USERNAME_MAX,
             });
         }
-        let mut out =
-            Vec::with_capacity(1 + name.len() + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN);
+        let versions = normalize_versions(&self.versions)?;
+        let mut out = Vec::with_capacity(
+            1 + name.len()
+                + X25519_KEY_LEN
+                + ED25519_KEY_LEN
+                + TS_LEN
+                + if versions.as_slice() == [1] {
+                    0
+                } else {
+                    1 + versions.len()
+                },
+        );
         // Length-checked above against USERNAME_MAX (64), so the cast cannot truncate.
         out.push(u8::try_from(name.len()).expect("username length fits in u8"));
         out.extend_from_slice(name);
         out.extend_from_slice(&self.x25519_pk);
         out.extend_from_slice(&self.ed25519_spk);
         out.extend_from_slice(&self.ts.to_be_bytes());
+        if versions.as_slice() != [1] {
+            out.push(u8::try_from(versions.len()).expect("versions len fits in u8"));
+            out.extend_from_slice(&versions);
+        }
         Ok(out)
     }
 
     /// Parse a body buffer (no signature trailer) back into an [`IdentityRecord`].
+    ///
+    /// Tolerates the optional `versions` suffix (length-prefixed list of
+    /// u8 version numbers, sorted-and-unique). Absent suffix is interpreted
+    /// as `versions = [1]`, matching the pre-versions encoding.
     pub fn from_body_bytes(body: &[u8]) -> Result<Self, IdentityError> {
         if body.len() < 1 + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN + 1 {
             return Err(IdentityError::BodyTooShort);
@@ -151,8 +228,8 @@ impl IdentityRecord {
         if name_len == 0 || name_len > USERNAME_MAX {
             return Err(IdentityError::InvalidUsernameLength);
         }
-        let expected = 1 + name_len + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN;
-        if body.len() != expected {
+        let v1_end = 1 + name_len + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN;
+        if body.len() < v1_end {
             return Err(IdentityError::BodyLengthMismatch);
         }
         let mut offset = 1;
@@ -169,11 +246,33 @@ impl IdentityRecord {
         let mut ts_bytes = [0u8; TS_LEN];
         ts_bytes.copy_from_slice(&body[offset..offset + TS_LEN]);
         let ts = u64::from_be_bytes(ts_bytes);
+        offset += TS_LEN;
+        let versions: Vec<u8> = if offset < body.len() {
+            let versions_len = body[offset] as usize;
+            offset += 1;
+            if versions_len == 0 {
+                return Err(IdentityError::VersionsSuffixEmpty);
+            }
+            if offset + versions_len != body.len() {
+                return Err(IdentityError::BodyLengthMismatch);
+            }
+            let raw = body[offset..offset + versions_len].to_vec();
+            let canonical = normalize_versions(&raw)?;
+            if canonical != raw {
+                return Err(IdentityError::VersionsNotCanonical);
+            }
+            canonical
+        } else if offset != body.len() {
+            return Err(IdentityError::BodyLengthMismatch);
+        } else {
+            vec![1]
+        };
         Ok(Self {
             username,
             x25519_pk,
             ed25519_spk,
             ts,
+            versions,
         })
     }
 
@@ -226,6 +325,17 @@ mod tests {
             x25519_pk: [0x11; X25519_KEY_LEN],
             ed25519_spk: [0x22; ED25519_KEY_LEN],
             ts: 1_700_000_000,
+            versions: vec![1],
+        }
+    }
+
+    fn sample_record_with_versions(username: &str, versions: Vec<u8>) -> IdentityRecord {
+        IdentityRecord {
+            username: username.to_string(),
+            x25519_pk: [0x11; X25519_KEY_LEN],
+            ed25519_spk: [0x22; ED25519_KEY_LEN],
+            ts: 1_700_000_000,
+            versions,
         }
     }
 
@@ -295,9 +405,24 @@ mod tests {
     }
 
     #[test]
-    fn from_body_bytes_rejects_length_mismatch() {
+    fn from_body_bytes_rejects_length_mismatch_with_versions_suffix() {
+        // A single trailing byte is now interpreted as the start of a
+        // versions suffix (versions_len byte). versions_len = 0 is
+        // illegal — so this exercises the "empty versions suffix" reject.
         let mut body = sample_record("alice").to_body_bytes().unwrap();
         body.push(0);
+        assert!(matches!(
+            IdentityRecord::from_body_bytes(&body),
+            Err(IdentityError::VersionsSuffixEmpty),
+        ));
+    }
+
+    #[test]
+    fn from_body_bytes_rejects_versions_suffix_length_overrun() {
+        // versions_len = 3 but only 1 byte follows → must reject.
+        let mut body = sample_record("alice").to_body_bytes().unwrap();
+        body.push(3);
+        body.push(1);
         assert!(matches!(
             IdentityRecord::from_body_bytes(&body),
             Err(IdentityError::BodyLengthMismatch),
@@ -347,7 +472,7 @@ mod tests {
     #[test]
     fn sign_and_parse_round_trip() {
         let crypto = DmpCrypto::generate();
-        let record = make_record(&crypto, "alice", Some(1_700_000_000));
+        let record = make_record(&crypto, "alice", Some(1_700_000_000), &[1]).unwrap();
         let wire = record.sign(&crypto).unwrap();
         let (parsed, _sig) = IdentityRecord::parse_and_verify(&wire).expect("must verify");
         assert_eq!(parsed, record);
@@ -356,7 +481,7 @@ mod tests {
     #[test]
     fn parse_and_verify_rejects_missing_prefix() {
         let crypto = DmpCrypto::generate();
-        let record = make_record(&crypto, "alice", Some(1));
+        let record = make_record(&crypto, "alice", Some(1), &[1]).unwrap();
         let wire = record.sign(&crypto).unwrap();
         let stripped = wire.strip_prefix(RECORD_PREFIX).unwrap();
         assert!(IdentityRecord::parse_and_verify(stripped).is_none());
@@ -371,7 +496,7 @@ mod tests {
     #[test]
     fn parse_and_verify_rejects_flipped_signature() {
         let crypto = DmpCrypto::generate();
-        let record = make_record(&crypto, "alice", Some(1));
+        let record = make_record(&crypto, "alice", Some(1), &[1]).unwrap();
         let wire = record.sign(&crypto).unwrap();
         let payload = wire.strip_prefix(RECORD_PREFIX).unwrap();
         let mut bytes = BASE64_STANDARD.decode(payload).unwrap();
@@ -379,6 +504,98 @@ mod tests {
         bytes[last] ^= 0x01;
         let tampered = format!("{RECORD_PREFIX}{}", BASE64_STANDARD.encode(&bytes));
         assert!(IdentityRecord::parse_and_verify(&tampered).is_none());
+    }
+
+    // ---- versions suffix -----------------------------------------------
+
+    #[test]
+    fn v1_only_record_has_no_suffix_on_wire() {
+        // A record explicitly publishing versions=[1] is bit-identical
+        // to the pre-versions historical encoding.
+        let record = sample_record_with_versions("alice", vec![1]);
+        let body = record.to_body_bytes().unwrap();
+        // 1 (name_len) + 5 (name) + 32 + 32 + 8 = 78 bytes, no suffix.
+        assert_eq!(
+            body.len(),
+            1 + 5 + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN
+        );
+    }
+
+    #[test]
+    fn multi_version_record_appends_suffix() {
+        let record = sample_record_with_versions("alice", vec![1, 2]);
+        let body = record.to_body_bytes().unwrap();
+        // base 78 + 1 (versions_len) + 2 (two version bytes) = 81
+        assert_eq!(
+            body.len(),
+            1 + 5 + X25519_KEY_LEN + ED25519_KEY_LEN + TS_LEN + 1 + 2
+        );
+        // Last 3 bytes: len=2, then [1, 2] sorted.
+        let len = body.len();
+        assert_eq!(&body[len - 3..], &[2, 1, 2]);
+    }
+
+    #[test]
+    fn versions_roundtrip_multi() {
+        let record = sample_record_with_versions("alice", vec![1, 2, 7]);
+        let body = record.to_body_bytes().unwrap();
+        let parsed = IdentityRecord::from_body_bytes(&body).unwrap();
+        assert_eq!(parsed.versions, vec![1, 2, 7]);
+    }
+
+    #[test]
+    fn legacy_no_suffix_parses_as_v1_only() {
+        // A body in the pre-versions format (no suffix) MUST default
+        // to versions = [1].
+        let record = sample_record_with_versions("alice", vec![1]);
+        let body = record.to_body_bytes().unwrap();
+        let parsed = IdentityRecord::from_body_bytes(&body).unwrap();
+        assert_eq!(parsed.versions, vec![1]);
+    }
+
+    #[test]
+    fn make_record_normalizes_versions() {
+        let crypto = DmpCrypto::generate();
+        // Out-of-order and duplicate versions get sorted + deduped.
+        let record = make_record(&crypto, "alice", Some(1), &[2, 1, 2, 7]).unwrap();
+        assert_eq!(record.versions, vec![1, 2, 7]);
+    }
+
+    #[test]
+    fn make_record_rejects_empty_versions() {
+        let crypto = DmpCrypto::generate();
+        assert!(matches!(
+            make_record(&crypto, "alice", Some(1), &[]),
+            Err(IdentityError::VersionsArgEmpty),
+        ));
+    }
+
+    #[test]
+    fn from_body_bytes_rejects_empty_versions_suffix() {
+        // Construct a body with versions_len = 0 (illegal).
+        let crypto = DmpCrypto::generate();
+        let record = make_record(&crypto, "alice", Some(1), &[1]).unwrap();
+        let mut body = record.to_body_bytes().unwrap();
+        body.push(0); // versions_len = 0
+        assert!(matches!(
+            IdentityRecord::from_body_bytes(&body),
+            Err(IdentityError::VersionsSuffixEmpty),
+        ));
+    }
+
+    #[test]
+    fn from_body_bytes_rejects_unsorted_versions_suffix() {
+        // Construct a body whose versions suffix is [2, 1] (not sorted).
+        let crypto = DmpCrypto::generate();
+        let record = make_record(&crypto, "alice", Some(1), &[1]).unwrap();
+        let mut body = record.to_body_bytes().unwrap();
+        body.push(2); // versions_len = 2
+        body.push(2);
+        body.push(1);
+        assert!(matches!(
+            IdentityRecord::from_body_bytes(&body),
+            Err(IdentityError::VersionsNotCanonical),
+        ));
     }
 
     #[test]
