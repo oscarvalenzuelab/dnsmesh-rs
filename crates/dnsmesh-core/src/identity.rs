@@ -79,6 +79,12 @@ pub enum IdentityError {
     /// A caller-supplied `versions` slice was empty.
     #[error("versions must include at least one entry")]
     VersionsArgEmpty,
+    /// The normalized versions list has more entries than fit in the
+    /// 1-byte on-wire length prefix (limit: 255). Reaching this requires
+    /// 256 distinct `u8` values, so it is a misuse-only error, not
+    /// something that can come back from a well-formed peer.
+    #[error("versions list too long ({0}); max 255 distinct entries")]
+    VersionsArgTooLong(usize),
 }
 
 /// DNS name where `username`'s identity record lives under `base_domain`.
@@ -150,6 +156,14 @@ pub fn normalize_versions(versions: &[u8]) -> Result<Vec<u8>, IdentityError> {
     let mut out: Vec<u8> = versions.to_vec();
     out.sort_unstable();
     out.dedup();
+    // On-wire length prefix is 1 byte. Reject overlong input here so
+    // sign() / from_body_bytes never reach the u8 cast with an
+    // unrepresentable length. The dedup just ran, so any value > 255
+    // means the caller supplied 256 distinct u8s — a programming bug,
+    // never something we'd see on the wire.
+    if out.len() > u8::MAX as usize {
+        return Err(IdentityError::VersionsArgTooLong(out.len()));
+    }
     Ok(out)
 }
 
@@ -209,7 +223,11 @@ impl IdentityRecord {
         out.extend_from_slice(&self.ed25519_spk);
         out.extend_from_slice(&self.ts.to_be_bytes());
         if versions.as_slice() != [1] {
-            out.push(u8::try_from(versions.len()).expect("versions len fits in u8"));
+            // `normalize_versions` returned `VersionsArgTooLong` for any
+            // input that wouldn't fit in u8, so by this point the cast
+            // is provably truncation-free. Mirrors the same length-
+            // checked pattern as the username field above.
+            out.push(u8::try_from(versions.len()).expect("normalize_versions caps at 255"));
             out.extend_from_slice(&versions);
         }
         Ok(out)
@@ -568,6 +586,20 @@ mod tests {
             make_record(&crypto, "alice", Some(1), &[]),
             Err(IdentityError::VersionsArgEmpty),
         ));
+    }
+
+    #[test]
+    fn make_record_rejects_versions_overflowing_u8_len_prefix() {
+        // 256 distinct u8 values dedupes to a 256-entry vec, which
+        // cannot fit in the 1-byte on-wire length prefix. Reject in
+        // normalize_versions rather than panicking at serialization.
+        let crypto = DmpCrypto::generate();
+        let all: Vec<u8> = (0u16..=255).map(|x| x as u8).collect();
+        let err = make_record(&crypto, "alice", Some(1), &all).unwrap_err();
+        assert!(
+            matches!(err, IdentityError::VersionsArgTooLong(256)),
+            "expected VersionsArgTooLong(256), got {err:?}",
+        );
     }
 
     #[test]

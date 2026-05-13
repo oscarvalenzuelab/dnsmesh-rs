@@ -22,8 +22,8 @@ async fn main() -> Result<()> {
     let bob = build_client("bob", "bob.example.com", store.clone()).await?;
 
     // Both publish their identity + a prekey pool.
-    alice.publish_identity().await?;
-    bob.publish_identity().await?;
+    alice.publish_identity(false).await?;
+    bob.publish_identity(false).await?;
     alice.refresh_prekeys(10, 3600).await?;
     bob.refresh_prekeys(10, 3600).await?;
 
@@ -65,11 +65,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn build_client(
-    name: &str,
-    domain: &str,
-    store: Arc<InMemoryDnsStore>,
-) -> Result<DmpClient> {
+async fn build_client(name: &str, domain: &str, store: Arc<InMemoryDnsStore>) -> Result<DmpClient> {
     // Pad the username to a 16+ byte salt so Argon2id is happy.
     let mut salt = name.as_bytes().to_vec();
     while salt.len() < 16 {

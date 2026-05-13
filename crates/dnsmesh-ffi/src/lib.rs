@@ -177,12 +177,20 @@ pub struct InboxMessage {
     /// 32-byte Ed25519 verifying key of the sender, lifted verbatim
     /// from the verified slot manifest.
     pub sender_signing_pk: Vec<u8>,
-    /// Decrypted plaintext.
+    /// Decrypted plaintext (envelope already stripped).
     pub plaintext: Vec<u8>,
     /// Sender-supplied timestamp from the inner DMP header (Unix seconds).
     pub timestamp: u64,
     /// 16-byte message ID.
     pub msg_id: Vec<u8>,
+    /// SPK-verified sender label in canonical `user@host` form. `None`
+    /// when the message arrived without a DMPv2 envelope, when the
+    /// envelope's `from` claim failed canonicalization, when DNS
+    /// lookup failed, or when the resolved IdentityRecord's
+    /// `ed25519_spk` did not match the verified manifest. UI should
+    /// render this when present and fall back to `sender_signing_pk`
+    /// hex when absent.
+    pub sender_label: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -709,6 +717,7 @@ fn inbox_to_ffi(m: InnerInbox) -> InboxMessage {
         plaintext: m.plaintext,
         timestamp: m.timestamp,
         msg_id: m.msg_id.to_vec(),
+        sender_label: m.sender_label,
     }
 }
 
