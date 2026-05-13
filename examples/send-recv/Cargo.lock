@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "argon2",
  "base64",
@@ -362,7 +362,6 @@ dependencies = [
  "thiserror 2.0.18",
  "x25519-dalek",
  "zeroize",
- "zfec-rs",
 ]
 
 [[package]]
@@ -377,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-net"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dnsmesh-core",
@@ -394,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dnsmesh-core",
  "hex",
@@ -2282,12 +2281,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "zfec-rs"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3056bc66f085fdd156a145a90636aa7ff0d590f4ecd03a6b065f44e2dc93afab"
 
 [[package]]
 name = "zmij"

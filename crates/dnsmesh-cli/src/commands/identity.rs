@@ -24,7 +24,7 @@ pub async fn run(
     // to wire up `publish:` in config.yaml.
     if matches!(
         cmd,
-        IdentityCmd::Publish
+        IdentityCmd::Publish { .. }
             | IdentityCmd::RefreshPrekeys { .. }
             | IdentityCmd::Rotate { .. }
             | IdentityCmd::Revoke { .. }
@@ -52,11 +52,15 @@ pub async fn run(
             println!("ed25519_spk: {}", client.ed25519_signing_public_key_hex());
             println!("dns_name:   {dns_name}");
         }
-        IdentityCmd::Publish => {
+        IdentityCmd::Publish { advertise_v2 } => {
             require_publish(&built)?;
-            client.publish_identity().await?;
+            client.publish_identity(advertise_v2).await?;
             let dns_name = identity_domain(client.username(), client.domain());
-            println!("published identity at {dns_name}");
+            if advertise_v2 {
+                println!("published identity at {dns_name} (advertises DMPv2)");
+            } else {
+                println!("published identity at {dns_name}");
+            }
         }
         IdentityCmd::RefreshPrekeys { count, ttl } => {
             require_publish(&built)?;
@@ -83,6 +87,7 @@ pub async fn run(
             new_passphrase_env,
             ttl,
             exp_seconds,
+            advertise_v2,
         } => {
             require_publish(&built)?;
             run_rotate(
@@ -92,6 +97,7 @@ pub async fn run(
                 new_passphrase_env.as_deref(),
                 ttl,
                 exp_seconds,
+                advertise_v2,
             )
             .await?;
         }
@@ -160,6 +166,7 @@ async fn run_rotate(
     new_pass_env: Option<&str>,
     ttl: u32,
     exp_seconds: u64,
+    advertise_v2: bool,
 ) -> Result<()> {
     // 1. Get the new passphrase. Same priority as the existing
     //    `--insecure-passphrase-env DMP_PASS` plumbing: env var first,
@@ -208,7 +215,7 @@ async fn run_rotate(
     };
 
     let outcome = client
-        .rotate_identity(&new_crypto, rotate_reason, ttl, exp_seconds)
+        .rotate_identity(&new_crypto, rotate_reason, ttl, exp_seconds, advertise_v2)
         .await?;
 
     println!("rotation:    published (seq={})", outcome.seq);

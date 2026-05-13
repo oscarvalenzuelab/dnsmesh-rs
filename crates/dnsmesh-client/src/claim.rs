@@ -280,7 +280,7 @@ impl DmpClient {
                 if quarantine {
                     let _ = self.intro_queue.enqueue(NewIntro {
                         sender_spk: &manifest.sender_spk,
-                        sender_username: None,
+                        sender_username: decoded.sender_label.as_deref(),
                         msg_id: &manifest.msg_id,
                         payload: &decoded.plaintext,
                         expires_at: manifest.exp,

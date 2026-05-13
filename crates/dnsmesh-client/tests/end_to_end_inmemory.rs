@@ -58,8 +58,8 @@ async fn alice_send_to_bob_publishes_chunks_and_manifest() {
     let bob = make_client("bob", store.clone()).await;
 
     // Both publish identities + prekey pools.
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     let n_alice = alice.refresh_prekeys(10, 3600).await.unwrap();
     let n_bob = bob.refresh_prekeys(10, 3600).await.unwrap();
     assert_eq!(n_alice, 10);
@@ -110,7 +110,7 @@ async fn list_contacts_returns_pinned_entries() {
     let store = Arc::new(InMemoryDnsStore::new());
     let alice = make_client("alice2", store.clone()).await;
     let bob = make_client("bob2", store.clone()).await;
-    bob.publish_identity().await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     let bob_contact = alice.fetch_identity("bob2@mesh.local").await.unwrap();
     alice.add_contact(bob_contact).await.unwrap();
     let listed = alice.list_contacts().await.unwrap();
@@ -123,7 +123,7 @@ async fn add_contact_returns_false_on_overwrite() {
     let store = Arc::new(InMemoryDnsStore::new());
     let alice = make_client("alice3", store.clone()).await;
     let bob = make_client("bob3", store.clone()).await;
-    bob.publish_identity().await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     let c = alice.fetch_identity("bob3@mesh.local").await.unwrap();
     assert!(alice.add_contact(c.clone()).await.unwrap());
     assert!(!alice.add_contact(c).await.unwrap());
@@ -166,8 +166,8 @@ async fn alice_to_bob_round_trip_with_replay_dedup() {
     let alice = make_client("alice-rt", store.clone()).await;
     let bob = make_client("bob-rt", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -209,8 +209,8 @@ async fn tofu_mode_accepts_signature_valid_manifest_without_pinning() {
     let alice = make_client("alice-tofu", store.clone()).await;
     let bob = make_client("bob-tofu", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -247,9 +247,9 @@ async fn pinned_mode_drops_manifest_from_unknown_sender() {
     let bob = make_client("bob-strict", store.clone()).await;
     let charlie = make_client("charlie-strict", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -297,9 +297,9 @@ async fn accept_intro_promotes_payload_without_pinning_sender() {
     let bob = make_client("bob-aci", store.clone()).await;
     let charlie = make_client("charlie-aci", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -351,9 +351,9 @@ async fn trust_intro_pins_sender_and_promotes_payload() {
     let bob = make_client("bob-trust", store.clone()).await;
     let charlie = make_client("charlie-trust", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -413,9 +413,9 @@ async fn block_intro_denylists_future_messages_from_same_sender() {
     let bob = make_client("bob-blk", store.clone()).await;
     let charlie = make_client("charlie-blk", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -458,9 +458,9 @@ async fn second_receive_does_not_double_quarantine() {
     let bob = make_client("bob-dq", store.clone()).await;
     let charlie = make_client("charlie-dq", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(10, 3600).await.unwrap();
     bob.refresh_prekeys(10, 3600).await.unwrap();
 
@@ -496,8 +496,8 @@ async fn receive_consumes_published_prekey_record() {
     let alice = make_client("alice-pkc", store.clone()).await;
     let bob = make_client("bob-pkc", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(3, 3600).await.unwrap();
     let n = bob.refresh_prekeys(3, 3600).await.unwrap();
     assert_eq!(n, 3);
@@ -553,8 +553,8 @@ async fn cross_zone_send_and_receive_round_trip() {
     let alice = make_client_in_zone("alice-xz", "alice.zone", store.clone()).await;
     let bob = make_client_in_zone("bob-xz", "bob.zone", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(5, 3600).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
 
@@ -623,8 +623,8 @@ async fn send_message_with_claim_publishes_both_manifest_and_claim() {
     let alice = make_client("alice-claim-pub", store.clone()).await;
     let bob = make_client("bob-claim-pub", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(5, 3600).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
 
@@ -688,8 +688,8 @@ async fn receive_via_claim_decrypts_and_routes_to_inbox() {
     let alice = make_client("alice-rvc", store.clone()).await;
     let bob = make_client("bob-rvc", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(5, 3600).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
 
@@ -728,9 +728,9 @@ async fn receive_via_claim_quarantines_unpinned_sender() {
     let bob = make_client("bob-rvcq", store.clone()).await;
     let charlie = make_client("charlie-rvcq", store.clone()).await;
 
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
-    charlie.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    charlie.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(5, 3600).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
 
@@ -805,11 +805,11 @@ async fn rotation_chain_walks_to_new_key_when_enabled() {
     // it if needed (the rotation chain walk doesn't require it, but
     // we want a complete world). alice-old publishes too so bob's
     // initial fetch picks up alice-old's keys.
-    alice_old.publish_identity().await.unwrap();
+    alice_old.publish_identity(false).await.unwrap();
     // Different identity record at the SAME identity name as alice-old.
     // The InMemoryDnsStore RRset semantics let both records co-exist;
     // the receive flow (and rotation walker) verify each independently.
-    alice_new.publish_identity().await.unwrap();
+    alice_new.publish_identity(false).await.unwrap();
     alice_new.refresh_prekeys(5, 3600).await.unwrap();
 
     // Rebuild the two crypto handles directly so we can sign the
@@ -847,7 +847,7 @@ async fn rotation_chain_walks_to_new_key_when_enabled() {
 
     // Bob — note that we open him with rotation_chain_enabled = true.
     let bob = make_client_in_zone_with("bob-rot", "mesh.local", store.clone(), true).await;
-    bob.publish_identity().await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
 
     // Bob pins ALICE-OLD (the key he originally onboarded against).
@@ -928,8 +928,8 @@ async fn rotation_chain_disabled_quarantines_rotated_key() {
         rotation_chain_enabled: false,
     };
     let alice_new = DmpClient::new(alice_new_cfg).await.unwrap();
-    alice_old.publish_identity().await.unwrap();
-    alice_new.publish_identity().await.unwrap();
+    alice_old.publish_identity(false).await.unwrap();
+    alice_new.publish_identity(false).await.unwrap();
     alice_new.refresh_prekeys(5, 3600).await.unwrap();
 
     let mut s_old = b"alice-nrot".to_vec();
@@ -962,7 +962,7 @@ async fn rotation_chain_disabled_quarantines_rotated_key() {
 
     // bob with rotation_chain_enabled = false (default).
     let bob = make_client_in_zone("bob-nrot", "mesh.local", store.clone()).await;
-    bob.publish_identity().await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
     let bob_pins_alice_old = dnsmesh_client::Contact {
         username: "alice-nrot".to_string(),
@@ -1040,8 +1040,8 @@ async fn rotation_chain_revocation_check_fails_closed_on_dns_error() {
     // through the in_pinned_set branch rather than TOFU.
     let alice = make_client_in_zone_with("alice-revfc", "mesh.local", store.clone(), true).await;
     let bob = make_client_in_zone_with("bob-revfc", "mesh.local", store.clone(), true).await;
-    alice.publish_identity().await.unwrap();
-    bob.publish_identity().await.unwrap();
+    alice.publish_identity(false).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
     alice.refresh_prekeys(5, 3600).await.unwrap();
     bob.refresh_prekeys(5, 3600).await.unwrap();
     let bob_contact = alice.fetch_identity("bob-revfc@mesh.local").await.unwrap();
@@ -1095,6 +1095,124 @@ async fn rotation_chain_revocation_check_fails_closed_on_dns_error() {
         inbox.len(),
         1,
         "control: with a working reader, the manifest delivers normally",
+    );
+}
+
+#[tokio::test]
+async fn dmpv2_envelope_round_trip_populates_sender_label() {
+    // Both sides advertise v2: alice publishes with --advertise-v2,
+    // bob publishes with --advertise-v2, alice pins bob, alice sends,
+    // bob receives. The receiver MUST surface a `sender_label` of
+    // "alice@mesh.local" because the envelope's `from` claim resolves
+    // back to alice's IdentityRecord with the same SPK as the
+    // manifest. This is the happy path the desktop UI depends on for
+    // first-contact rendering.
+    let store = Arc::new(InMemoryDnsStore::new());
+    let alice = make_client("alice-v2", store.clone()).await;
+    let bob = make_client("bob-v2", store.clone()).await;
+
+    alice.publish_identity(true).await.unwrap();
+    bob.publish_identity(true).await.unwrap();
+    alice.refresh_prekeys(5, 3600).await.unwrap();
+    bob.refresh_prekeys(5, 3600).await.unwrap();
+
+    let bob_contact = alice.fetch_identity("bob-v2@mesh.local").await.unwrap();
+    alice.add_contact(bob_contact).await.unwrap();
+    let alice_contact = bob.fetch_identity("alice-v2@mesh.local").await.unwrap();
+    bob.add_contact(alice_contact).await.unwrap();
+
+    alice.send_message("bob-v2", b"hello v2").await.unwrap();
+    let inbox = bob.receive_messages().await.unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].plaintext, b"hello v2");
+    assert_eq!(
+        inbox[0].sender_label.as_deref(),
+        Some("alice-v2@mesh.local"),
+        "v2 receiver must surface the SPK-verified sender label",
+    );
+}
+
+#[tokio::test]
+async fn dmpv2_sender_with_v1_only_recipient_uses_no_envelope() {
+    // Alice advertises v2 but bob only advertises v1. The send path
+    // checks bob's published `versions` (currently [1]) and falls
+    // back to plain wire format. Bob's receive path decrypts without
+    // an envelope and surfaces `sender_label = None` — existing v1
+    // receivers continue to work unchanged.
+    let store = Arc::new(InMemoryDnsStore::new());
+    let alice = make_client("alice-mix", store.clone()).await;
+    let bob = make_client("bob-mix", store.clone()).await;
+
+    alice.publish_identity(true).await.unwrap();
+    bob.publish_identity(false).await.unwrap();
+    alice.refresh_prekeys(5, 3600).await.unwrap();
+    bob.refresh_prekeys(5, 3600).await.unwrap();
+
+    let bob_contact = alice.fetch_identity("bob-mix@mesh.local").await.unwrap();
+    alice.add_contact(bob_contact).await.unwrap();
+    let alice_contact = bob.fetch_identity("alice-mix@mesh.local").await.unwrap();
+    bob.add_contact(alice_contact).await.unwrap();
+
+    alice
+        .send_message("bob-mix", b"hello legacy")
+        .await
+        .unwrap();
+    let inbox = bob.receive_messages().await.unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].plaintext, b"hello legacy");
+    assert_eq!(
+        inbox[0].sender_label, None,
+        "v1-only recipient must not see a sender_label — no envelope was emitted",
+    );
+}
+
+#[tokio::test]
+async fn dmpv2_first_contact_intro_queue_keeps_sender_label() {
+    // Alice and bob both advertise v2 but bob has NOT pinned alice.
+    // Alice's message lands in bob's intro queue (quarantine). The
+    // intro row must preserve the SPK-verified sender label from the
+    // envelope so the desktop UI can render "alice-fc@mesh.local"
+    // next to the pending-intro card instead of forcing the user to
+    // recognize a raw 32-byte SPK.
+    let store = Arc::new(InMemoryDnsStore::new());
+    let alice = make_client("alice-fc", store.clone()).await;
+    let bob = make_client("bob-fc", store.clone()).await;
+
+    alice.publish_identity(true).await.unwrap();
+    bob.publish_identity(true).await.unwrap();
+    alice.refresh_prekeys(5, 3600).await.unwrap();
+    bob.refresh_prekeys(5, 3600).await.unwrap();
+
+    // Alice pins bob (so she can send). Bob has another pinned
+    // contact to keep pinned-contacts mode active — without any
+    // pinned contact, TOFU mode would deliver alice straight to the
+    // inbox instead of quarantining her.
+    let bob_contact = alice.fetch_identity("bob-fc@mesh.local").await.unwrap();
+    alice.add_contact(bob_contact).await.unwrap();
+    let other = make_client("other-fc", store.clone()).await;
+    other.publish_identity(false).await.unwrap();
+    let other_contact = bob.fetch_identity("other-fc@mesh.local").await.unwrap();
+    bob.add_contact(other_contact).await.unwrap();
+
+    alice
+        .send_message("bob-fc", b"intro request")
+        .await
+        .unwrap();
+    let inbox = bob.receive_messages().await.unwrap();
+    assert!(
+        inbox.is_empty(),
+        "alice is not pinned by bob; her message must quarantine, not deliver",
+    );
+    let pending = bob.list_intros().await.unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "alice's message must surface in the intro queue"
+    );
+    assert_eq!(
+        pending[0].sender_username.as_deref(),
+        Some("alice-fc@mesh.local"),
+        "intro row must preserve the SPK-verified sender label for UI rendering",
     );
 }
 

@@ -163,7 +163,10 @@ async fn rust_send_python_receive_round_trip() {
     // her manifest signature against an in-zone identity record. (TOFU
     // also accepts any signature-valid manifest, but publishing is
     // closer to real usage and validates the publish path round-trip.)
-    alice.publish_identity().await.expect("publish_identity");
+    alice
+        .publish_identity(false)
+        .await
+        .expect("publish_identity");
     alice
         .refresh_prekeys(5, u64::from(PUBLISH_TTL))
         .await

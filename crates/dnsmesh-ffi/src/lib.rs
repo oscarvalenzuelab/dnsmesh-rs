@@ -177,12 +177,20 @@ pub struct InboxMessage {
     /// 32-byte Ed25519 verifying key of the sender, lifted verbatim
     /// from the verified slot manifest.
     pub sender_signing_pk: Vec<u8>,
-    /// Decrypted plaintext.
+    /// Decrypted plaintext (envelope already stripped).
     pub plaintext: Vec<u8>,
     /// Sender-supplied timestamp from the inner DMP header (Unix seconds).
     pub timestamp: u64,
     /// 16-byte message ID.
     pub msg_id: Vec<u8>,
+    /// SPK-verified sender label in canonical `user@host` form. `None`
+    /// when the message arrived without a DMPv2 envelope, when the
+    /// envelope's `from` claim failed canonicalization, when DNS
+    /// lookup failed, or when the resolved IdentityRecord's
+    /// `ed25519_spk` did not match the verified manifest. UI should
+    /// render this when present and fall back to `sender_signing_pk`
+    /// hex when absent.
+    pub sender_label: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -514,12 +522,16 @@ impl DmpClient {
     }
 
     /// Publish the long-term identity TXT record.
-    pub fn publish_identity(&self) -> Result<(), FfiError> {
+    ///
+    /// `advertise_v2 = true` adds `versions=[1,2]` to the record so
+    /// v2-aware senders may emit DMPv2 envelopes. `false` keeps the
+    /// record bit-identical to v1.
+    pub fn publish_identity(&self, advertise_v2: bool) -> Result<(), FfiError> {
         if !self.inner.publish_configured {
             return Err(FfiError::PublishNotConfigured);
         }
         self.inner
-            .block_on(self.inner.client.publish_identity())??;
+            .block_on(self.inner.client.publish_identity(advertise_v2))??;
         Ok(())
     }
 
@@ -705,6 +717,7 @@ fn inbox_to_ffi(m: InnerInbox) -> InboxMessage {
         plaintext: m.plaintext,
         timestamp: m.timestamp,
         msg_id: m.msg_id.to_vec(),
+        sender_label: m.sender_label,
     }
 }
 
@@ -762,7 +775,7 @@ mod tests {
         assert_eq!(client.ed25519_signing_public_key_hex().len(), 64);
         assert_eq!(client.username(), "solo");
 
-        client.publish_identity().expect("publish_identity");
+        client.publish_identity(false).expect("publish_identity");
         let n = client.refresh_prekeys(3, 3600).expect("refresh_prekeys");
         assert_eq!(n, 3, "in-memory store always accepts publishes");
 
@@ -803,8 +816,10 @@ mod tests {
             DmpClient::new_with_shared_store(alice_cfg, store.clone()).expect("alice construction");
         let bob = DmpClient::new_with_shared_store(bob_cfg, store).expect("bob construction");
 
-        alice.publish_identity().expect("alice publish_identity");
-        bob.publish_identity().expect("bob publish_identity");
+        alice
+            .publish_identity(false)
+            .expect("alice publish_identity");
+        bob.publish_identity(false).expect("bob publish_identity");
         alice.refresh_prekeys(5, 3600).expect("alice prekeys");
         bob.refresh_prekeys(5, 3600).expect("bob prekeys");
 
@@ -911,7 +926,7 @@ mod tests {
 
         assert!(
             matches!(
-                client.publish_identity().unwrap_err(),
+                client.publish_identity(false).unwrap_err(),
                 FfiError::PublishNotConfigured
             ),
             "publish_identity must refuse when publish is unconfigured",

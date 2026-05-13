@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dnsmesh_core::chunking::MessageChunker;
 use dnsmesh_core::crypto::derive_user_id;
+use dnsmesh_core::envelope;
 use dnsmesh_core::erasure;
 use dnsmesh_core::manifest::{SlotManifest, NO_PREKEY};
 use dnsmesh_core::message::{DMPHeader, DMPMessage, MessageType};
@@ -75,6 +76,26 @@ fn unix_now() -> u64 {
 }
 
 impl DmpClient {
+    /// Cross-version gate for the send path.
+    ///
+    /// Check the recipient's published `versions` BEFORE encrypting;
+    /// wrap with a DMPv2 envelope only if they declared v2 support in
+    /// their IdentityRecord. A v1-only recipient receives the
+    /// plaintext as-is so existing receivers keep working without
+    /// re-pinning. The envelope's `from` claim is the sender's
+    /// canonical address — the receiver will resolve it back through
+    /// DNS and compare against the manifest SPK before trusting the
+    /// label.
+    async fn maybe_wrap_envelope(&self, contact: &Contact, plaintext: &[u8]) -> Vec<u8> {
+        let recipient_versions = self.recipient_versions(contact).await;
+        if recipient_versions.contains(&2) {
+            let sender_addr = format!("{}@{}", self.username, self.domain);
+            envelope::encode(plaintext, Some(&sender_addr))
+        } else {
+            plaintext.to_vec()
+        }
+    }
+
     /// Wrap each erasure share with the per-chunk RS+checksum codec and
     /// publish under its `chunk-NNNN-<msg_key>.<domain>` DNS name. Returns
     /// the first publish failure encountered, or `Ok(())` when every chunk
@@ -183,6 +204,8 @@ impl DmpClient {
             None => (NO_PREKEY, contact.x25519_pk),
         };
 
+        let plaintext_owned = self.maybe_wrap_envelope(&contact, plaintext).await;
+
         // Encrypt with header-bound AAD. The AAD is a `DMPHeader` block with
         // `total_chunks=0` so it stays stable regardless of the post-
         // erasure chunk count, plus `prekey_id` as 4 big-endian bytes.
@@ -196,7 +219,7 @@ impl DmpClient {
         );
         let encrypted =
             self.crypto
-                .encrypt_for_recipient(plaintext, &recipient_pubkey, Some(&aad))?;
+                .encrypt_for_recipient(&plaintext_owned, &recipient_pubkey, Some(&aad))?;
 
         // Build the outer DMPMessage frame.  The header here uses the real
         // chunk count (set after erasure encode), unlike the AAD block.

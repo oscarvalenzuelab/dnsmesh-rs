@@ -128,6 +128,7 @@ impl DmpClient {
         reason: RotateReason,
         ttl_seconds: u32,
         exp_seconds: u64,
+        advertise_v2: bool,
     ) -> Result<RotateOutcome, ClientError> {
         let old_spk = self.crypto.signing_public_key_bytes();
         let new_spk = new_crypto.signing_public_key_bytes();
@@ -208,7 +209,8 @@ impl DmpClient {
         //    fail; the rotation chain is enough for chain-aware
         //    receivers, but a `dnsmesh identity fetch` won't find the
         //    new keys until the IdentityRecord re-publishes.
-        let new_identity = make_record(new_crypto, &self.username, Some(now));
+        let versions: &[u8] = if advertise_v2 { &[1, 2] } else { &[1] };
+        let new_identity = make_record(new_crypto, &self.username, Some(now), versions)?;
         let new_id_wire = new_identity.sign(new_crypto)?;
         let identity_name = identity_domain(&self.username, &self.domain);
         let id_ok = self
@@ -352,7 +354,7 @@ mod tests {
         );
 
         let outcome = alice
-            .rotate_identity(&new_crypto, RotateReason::Routine, 3600, 86_400)
+            .rotate_identity(&new_crypto, RotateReason::Routine, 3600, 86_400, false)
             .await
             .unwrap();
         assert!(outcome.rotation_record_published);
@@ -401,7 +403,7 @@ mod tests {
             DmpCrypto::from_passphrase("new-alice-rot-comp", Some(&salt("alice-rot-comp")))
                 .unwrap();
         let outcome = alice
-            .rotate_identity(&new_crypto, RotateReason::Compromise, 3600, 86_400)
+            .rotate_identity(&new_crypto, RotateReason::Compromise, 3600, 86_400, false)
             .await
             .unwrap();
         assert_eq!(outcome.revocation_published, Some(true));
@@ -446,7 +448,7 @@ mod tests {
         let alice = make_client("alice-same", store).await;
         let same = DmpCrypto::from_passphrase("old-alice-same", Some(&salt("alice-same"))).unwrap();
         let err = alice
-            .rotate_identity(&same, RotateReason::Routine, 3600, 86_400)
+            .rotate_identity(&same, RotateReason::Routine, 3600, 86_400, false)
             .await
             .unwrap_err();
         assert!(format!("{err}").contains("same signing key"));

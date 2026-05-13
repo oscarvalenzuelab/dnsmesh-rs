@@ -23,8 +23,13 @@ pub const DEFAULT_IDENTITY_TTL_SECONDS: u32 = 86_400;
 impl DmpClient {
     /// Publish this client's signed [`dnsmesh_core::identity::IdentityRecord`]
     /// TXT to its identity DNS name (`id-<sha256(username)[:16]>.<domain>`).
-    pub async fn publish_identity(&self) -> Result<(), ClientError> {
-        let record = make_record(&self.crypto, &self.username, None);
+    ///
+    /// `advertise_v2 = true` adds the `versions=[1,2]` suffix so v2-aware
+    /// senders may emit DMPv2 envelopes when targeting this identity.
+    /// `false` keeps the record bit-identical to v1 (no versions suffix).
+    pub async fn publish_identity(&self, advertise_v2: bool) -> Result<(), ClientError> {
+        let versions: &[u8] = if advertise_v2 { &[1, 2] } else { &[1] };
+        let record = make_record(&self.crypto, &self.username, None, versions)?;
         let wire = record.sign(&self.crypto)?;
         let name = identity_domain(&self.username, &self.domain);
         let ok = self
@@ -118,7 +123,7 @@ mod tests {
     async fn publish_identity_writes_a_verifiable_record() {
         let store = Arc::new(InMemoryDnsStore::new());
         let client = make_client("alice", store.clone()).await;
-        client.publish_identity().await.unwrap();
+        client.publish_identity(false).await.unwrap();
         let name = identity_domain(&client.username, &client.domain);
         let records = store.query_txt_record(&name).await.unwrap().unwrap();
         assert_eq!(records.len(), 1);

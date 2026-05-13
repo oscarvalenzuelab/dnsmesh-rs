@@ -143,7 +143,7 @@ mod tests {
         let alice = make_client("alice-unpub", store.clone()).await;
 
         // Publish a baseline so there's something to sweep.
-        alice.publish_identity().await.unwrap();
+        alice.publish_identity(false).await.unwrap();
         alice.refresh_prekeys(3, 3600).await.unwrap();
 
         // Pre-condition: identity + prekey records exist in the store.
@@ -189,7 +189,7 @@ mod tests {
     async fn unpublish_is_idempotent() {
         let store = Arc::new(InMemoryDnsStore::new());
         let alice = make_client("alice-unpub-idem", store.clone()).await;
-        alice.publish_identity().await.unwrap();
+        alice.publish_identity(false).await.unwrap();
         // First sweep removes; second sweep is a no-op (nothing to
         // delete) but still completes without error.
         alice.unpublish_identity().await.unwrap();

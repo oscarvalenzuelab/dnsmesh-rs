@@ -132,7 +132,16 @@ pub enum IdentityCmd {
     Show,
 
     /// Publish the signed identity record to DNS.
-    Publish,
+    Publish {
+        /// Advertise support for DMPv2 envelope. Adds `versions=[1,2]`
+        /// to the IdentityRecord so v2-aware senders may wrap their
+        /// ciphertext in a `DMPV2:` plaintext envelope when targeting
+        /// this identity. Without this flag, the record stays bit-
+        /// identical to v1 (omits the versions suffix) and v2 senders
+        /// fall back to the plain wire format.
+        #[arg(long)]
+        advertise_v2: bool,
+    },
 
     /// Generate and publish a fresh pool of one-time prekeys.
     RefreshPrekeys {
@@ -189,6 +198,11 @@ pub enum IdentityCmd {
         /// RotationRecord exp horizon (seconds from now). Default 1y.
         #[arg(long, default_value_t = 86_400 * 365)]
         exp_seconds: u64,
+        /// Advertise support for DMPv2 envelope on the new-key
+        /// IdentityRecord. See `dnsmesh identity publish
+        /// --advertise-v2`.
+        #[arg(long)]
+        advertise_v2: bool,
     },
 
     /// Publish a self-signed RevocationRecord for the CURRENT key.
