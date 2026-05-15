@@ -594,7 +594,11 @@ mod tests {
         // cannot fit in the 1-byte on-wire length prefix. Reject in
         // normalize_versions rather than panicking at serialization.
         let crypto = DmpCrypto::generate();
-        let all: Vec<u8> = (0u16..=255).map(|x| x as u8).collect();
+        // Iterate u16 then narrow so the range covers 0..=255 without
+        // overflowing u8 on the loop counter.
+        let all: Vec<u8> = (0u16..=255)
+            .map(|x| u8::try_from(x).expect("0..=255 always fits in u8"))
+            .collect();
         let err = make_record(&crypto, "alice", Some(1), &all).unwrap_err();
         assert!(
             matches!(err, IdentityError::VersionsArgTooLong(256)),

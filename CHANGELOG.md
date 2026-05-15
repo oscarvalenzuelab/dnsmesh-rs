@@ -13,6 +13,42 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-15 — DMPv2 plaintext envelope
+
+Pulls the Rust port up to wire parity with the Python 0.7.5 release.
+DMPv2 envelope landed end-to-end: encoder, decoder, ASCII-only
+canonicalizer, identity `versions` capability field, send-side
+capability gate, receive-side SPK-binding verifier, FFI surface for
+`InboxMessage.sender_label`, opt-in `--advertise-v2` flag on the CLI.
+
+### Added
+
+- `dnsmesh_core::envelope` module — strict ASCII-only `user@host`
+  canonicalization, `encode()` / `decode()` for the DMPv2 plaintext
+  wrapper, 256-byte header cap.
+- `IdentityRecord.versions: Vec<u8>` with `normalize_versions()`
+  guard that rejects overlong inputs as `VersionsArgTooLong` instead
+  of panicking at serialization. Default omits the suffix and stays
+  byte-identical to pre-this-release records.
+- `publish_identity(advertise_v2: bool)` and
+  `rotate_identity(..., advertise_v2)` on the client API; matching
+  `--advertise-v2` flag on `dnsmesh identity publish` / `rotate`.
+- `DmpClient::recipient_versions()` and `resolve_envelope_label()`
+  helpers powering the send-side gate and the receive-side SPK
+  binding.
+- `InboxMessage.sender_label: Option<String>` plumbed all the way
+  through the FFI so Tauri / Swift / Kotlin consumers see the
+  SPK-verified label.
+- Interop vector files `dmpv2_envelope.json` and an extended
+  `identity_record.json`, both synced from the Python reference and
+  exercised in `interop_dmpv2_envelope.rs` / `interop_identity.rs`.
+
+### Changed
+
+- Send path conditionally wraps the plaintext with a DMPv2 envelope
+  when the recipient advertises `versions` containing `2`; falls
+  back to v1 wire format otherwise.
+
 ## [0.1.0] — 2026-05-03
 
 Initial release of the Rust port of the DNS Mesh Protocol. Wire
