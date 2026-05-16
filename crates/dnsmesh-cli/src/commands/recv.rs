@@ -135,10 +135,21 @@ fn print_human(msg: &InboxMessage) {
     let sender = hex::encode(msg.sender_signing_pk);
     let short_sender = &sender[..sender.len().min(16)];
     let msg_id = hex::encode(msg.msg_id);
-    println!(
-        "from {short_sender}…  msg_id={msg_id}  ts={}",
-        msg.timestamp
-    );
+    // Show the SPK-verified envelope label when present; fall back
+    // to the SPK hex for v1 (no envelope) or label-failed-verify
+    // cases. `sender_label` arrives populated only when the
+    // inbound DMPv2 envelope's `from` claim resolved back to an
+    // IdentityRecord pinning the same Ed25519 key as the manifest.
+    match &msg.sender_label {
+        Some(label) => println!(
+            "from {label} ({short_sender}…)  msg_id={msg_id}  ts={}",
+            msg.timestamp
+        ),
+        None => println!(
+            "from {short_sender}…  msg_id={msg_id}  ts={}",
+            msg.timestamp
+        ),
+    }
     match std::str::from_utf8(&msg.plaintext) {
         Ok(text) => println!("  {text}"),
         Err(_) => println!("  (binary, {} bytes)", msg.plaintext.len()),
