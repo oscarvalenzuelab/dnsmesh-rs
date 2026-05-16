@@ -3,7 +3,7 @@
 //! Wraps the AEAD plaintext with a versioned header that carries optional
 //! sender metadata (today: `from = user@host`). Lives INSIDE the AEAD
 //! ciphertext, so the wrapper itself is not visible on the wire — DNS chunks
-//! still expose only the existing [`crate::message::DmpHeader`] JSON and the
+//! still expose only the existing [`crate::message::DMPHeader`] JSON and the
 //! encrypted blob.
 //!
 //! Wire format:
