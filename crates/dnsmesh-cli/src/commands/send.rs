@@ -9,6 +9,7 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
+use dnsmesh_client::ClientError;
 use dnsmesh_core::identity::parse_address;
 
 use crate::cli::SendArgs;
@@ -61,11 +62,8 @@ pub async fn run(
         warn_cross_zone_first_contact(&recipient_addr, client.domain());
     }
 
-    let msg_id = if args.claim_via.is_empty() {
-        client
-            .send_message(&recipient_username, &body)
-            .await
-            .with_context(|| format!("sending to {recipient_addr}"))?
+    let send_result = if args.claim_via.is_empty() {
+        client.send_message(&recipient_username, &body).await
     } else {
         // The client API takes &[&str]; flatten the owned Vec<String>
         // into refs without an extra allocation per element.
@@ -73,7 +71,31 @@ pub async fn run(
         client
             .send_message_with_claim(&recipient_username, &body, &provider_refs)
             .await
-            .with_context(|| format!("sending to {recipient_addr} via claim"))?
+    };
+    // Replying to a sender you accepted (but didn't trust) lands here.
+    // The actionable fix is one command — surface it on stderr so the
+    // operator doesn't have to dig through `identity fetch` + `contacts
+    // add --x25519 ... --ed25519 ...`. The error itself still bails so
+    // exit-code-driven scripts keep working.
+    //
+    // Only emit the hint when we have a parseable `user@host` address:
+    // `contacts add` rejects bare usernames (the new DNS-resolve path
+    // needs a domain), so we'd otherwise be suggesting a command that
+    // also fails. Bare-username sends fall through to the existing
+    // error chain unchanged.
+    if let Err(ClientError::ContactNotFound { ref username }) = send_result {
+        if parse_address(&recipient_addr).is_some() {
+            eprintln!(
+                "note: contact `{username}` is not pinned. Run\n  \
+                 dnsmesh contacts add {recipient_addr}\n\
+                 to resolve and pin them via DNS, then retry."
+            );
+        }
+    }
+    let msg_id = if args.claim_via.is_empty() {
+        send_result.with_context(|| format!("sending to {recipient_addr}"))?
+    } else {
+        send_result.with_context(|| format!("sending to {recipient_addr} via claim"))?
     };
     println!("{}", hex::encode(msg_id));
     maybe_flush(&built).await?;

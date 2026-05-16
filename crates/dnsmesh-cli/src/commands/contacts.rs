@@ -28,13 +28,21 @@ pub async fn run(
         } => {
             let (username, host) = parse_address(&address)
                 .ok_or_else(|| anyhow!("invalid address `{address}`: expected `user@host`"))?;
-            let x25519_pk = parse_hex32(&x25519, "x25519")?;
-            let ed25519_spk = parse_hex32(&ed25519, "ed25519")?;
-            let contact = Contact {
-                username: username.clone(),
-                x25519_pk,
-                ed25519_spk,
-                domain: host.clone(),
+            // Clap's `requires` cross-link guarantees both flags arrive
+            // together or neither does; the `match` here documents the
+            // two real call modes (manual keys vs DNS resolve).
+            let contact = match (x25519, ed25519) {
+                (Some(x), Some(e)) => Contact {
+                    username: username.clone(),
+                    x25519_pk: parse_hex32(&x, "x25519")?,
+                    ed25519_spk: parse_hex32(&e, "ed25519")?,
+                    domain: host.clone(),
+                },
+                (None, None) => client
+                    .fetch_identity(&address)
+                    .await
+                    .with_context(|| format!("resolving {address} via DNS"))?,
+                _ => unreachable!("clap `requires` couples x25519 + ed25519"),
             };
             let newly = client.add_contact(contact).await?;
             if newly {

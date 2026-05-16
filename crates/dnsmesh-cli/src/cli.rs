@@ -313,16 +313,23 @@ pub enum IntroCmd {
 
 #[derive(Debug, Subcommand)]
 pub enum ContactsCmd {
-    /// Manually pin a contact whose keys you already have.
+    /// Pin a contact by address.
+    ///
+    /// Without `--x25519` / `--ed25519`, resolves the address via DNS
+    /// (signed-IdentityRecord lookup, same path as `identity fetch`) and
+    /// pins whatever the zone returns. Pass both hex flags to pin keys
+    /// you already have on hand without touching DNS.
     Add {
         /// Address in the form `user@host`.
         address: String,
-        /// 64-char hex X25519 public key.
-        #[arg(long, value_name = "HEX")]
-        x25519: String,
-        /// 64-char hex Ed25519 verifying key.
-        #[arg(long, value_name = "HEX")]
-        ed25519: String,
+        /// 64-char hex X25519 public key. When omitted (together with
+        /// `--ed25519`) the keys are resolved from DNS.
+        #[arg(long, value_name = "HEX", requires = "ed25519")]
+        x25519: Option<String>,
+        /// 64-char hex Ed25519 verifying key. When omitted (together
+        /// with `--x25519`) the keys are resolved from DNS.
+        #[arg(long, value_name = "HEX", requires = "x25519")]
+        ed25519: Option<String>,
     },
 
     /// List every pinned contact.
