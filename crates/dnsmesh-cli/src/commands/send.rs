@@ -77,12 +77,20 @@ pub async fn run(
     // operator doesn't have to dig through `identity fetch` + `contacts
     // add --x25519 ... --ed25519 ...`. The error itself still bails so
     // exit-code-driven scripts keep working.
+    //
+    // Only emit the hint when we have a parseable `user@host` address:
+    // `contacts add` rejects bare usernames (the new DNS-resolve path
+    // needs a domain), so we'd otherwise be suggesting a command that
+    // also fails. Bare-username sends fall through to the existing
+    // error chain unchanged.
     if let Err(ClientError::ContactNotFound { ref username }) = send_result {
-        eprintln!(
-            "note: contact `{username}` is not pinned. Run\n  \
-             dnsmesh contacts add {recipient_addr}\n\
-             to resolve and pin them via DNS, then retry."
-        );
+        if parse_address(&recipient_addr).is_some() {
+            eprintln!(
+                "note: contact `{username}` is not pinned. Run\n  \
+                 dnsmesh contacts add {recipient_addr}\n\
+                 to resolve and pin them via DNS, then retry."
+            );
+        }
     }
     let msg_id = if args.claim_via.is_empty() {
         send_result.with_context(|| format!("sending to {recipient_addr}"))?
