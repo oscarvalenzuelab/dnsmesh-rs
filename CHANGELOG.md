@@ -13,6 +13,41 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-05-15 — CLI quality-of-life
+
+CLI-only release. SDK code is unchanged from 0.1.2; the desktop
+and mobile builds against `sdk-v0.1.2` keep working without
+re-pinning.
+
+### Added
+
+- `dnsmesh contacts add <addr>` now accepts the bare address form.
+  When `--x25519` and `--ed25519` are both omitted, the command
+  resolves the address via DNS (signed-IdentityRecord lookup,
+  same path as `identity fetch`) and pins whatever the zone
+  returns. Clap's `requires` cross-link keeps the all-or-nothing
+  contract — passing only one hex flag is a parse-time error.
+  Pinning by explicit hex keys still works for the offline /
+  scripted case.
+
+### Changed
+
+- `dnsmesh send` prints an actionable stderr hint on
+  `contact_not_found` before bailing — a one-line nudge pointing
+  at `dnsmesh contacts add <full address>`. Exit code unchanged.
+  Bare-username sends skip the hint since `contacts add` rejects
+  bare usernames.
+
+### Fixed
+
+- `dnsmesh recv` human output now displays the SPK-verified envelope
+  label (e.g. `from alice@example.com (78c40174…)`) when the inbound
+  DMPv2 envelope's `from` claim resolves back to an IdentityRecord
+  pinning the same Ed25519 key as the manifest. v1 messages and
+  envelope-failed-verify cases keep falling back to the SPK-hex
+  line. Closes parity with the Maildir writer, which already
+  stamped the verified address into From: headers.
+
 ## [0.1.2] — 2026-05-15 — DMPv2 plaintext envelope
 
 Pulls the Rust port up to wire parity with the Python 0.7.5 release.
