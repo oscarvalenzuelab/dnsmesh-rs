@@ -15,6 +15,11 @@ use dnsmesh_storage::{
     Contact, ContactStore, IntroQueue, NewContact, NewIntro, OpenedDb, PrekeyStore, ReplayCache,
 };
 
+/// Fixed SQLCipher key. Real callers derive theirs from the identity
+/// passphrase; this test only needs one that is 32 bytes and stable across
+/// the close/reopen it exercises.
+const TEST_KEY: [u8; 32] = [0x2a; 32];
+
 #[test]
 fn persists_across_reopen() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -34,10 +39,10 @@ fn persists_across_reopen() {
     {
         // Each store opens its own Connection. WAL mode handles the
         // cross-connection serialization for us.
-        let prekeys = PrekeyStore::new(OpenedDb::open(&path).unwrap());
-        let intros = IntroQueue::new(OpenedDb::open(&path).unwrap());
-        let replay = ReplayCache::new(OpenedDb::open(&path).unwrap());
-        let contacts = ContactStore::new(OpenedDb::open(&path).unwrap());
+        let prekeys = PrekeyStore::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+        let intros = IntroQueue::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+        let replay = ReplayCache::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+        let contacts = ContactStore::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
 
         // Prekeys: generate 3, remember their ids.
         let pool = prekeys.generate_pool(3, 3600).unwrap();
@@ -91,10 +96,10 @@ fn persists_across_reopen() {
     }
 
     // ---- reopen and verify -------------------------------------------------
-    let prekeys = PrekeyStore::new(OpenedDb::open(&path).unwrap());
-    let intros = IntroQueue::new(OpenedDb::open(&path).unwrap());
-    let replay = ReplayCache::new(OpenedDb::open(&path).unwrap());
-    let contacts = ContactStore::new(OpenedDb::open(&path).unwrap());
+    let prekeys = PrekeyStore::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+    let intros = IntroQueue::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+    let replay = ReplayCache::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
+    let contacts = ContactStore::new(OpenedDb::open(&path, &TEST_KEY).unwrap());
 
     // Prekeys survived: every id is still live, and the wire record came back.
     let mut live_after = prekeys.list_live_ids().unwrap();

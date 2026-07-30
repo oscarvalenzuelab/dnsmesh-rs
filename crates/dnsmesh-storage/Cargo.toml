@@ -11,7 +11,11 @@ description = "DMP local persistence for keys, sessions, and message state."
 
 [dependencies]
 dnsmesh-core = { path = "../dnsmesh-core" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+# SQLCipher rather than plain bundled sqlite: the database holds prekey
+# private halves and decrypted intro payloads, so the file itself is keyed.
+# `vendored-openssl` builds OpenSSL from source, which keeps cross-compiles
+# self-contained — see the Android note in the release workflow.
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 parking_lot = "0.12"
 thiserror = "2"

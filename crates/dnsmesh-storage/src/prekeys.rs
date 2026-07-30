@@ -342,7 +342,7 @@ mod tests {
     use super::*;
 
     fn store() -> PrekeyStore {
-        PrekeyStore::new(OpenedDb::open_in_memory().unwrap())
+        PrekeyStore::new(OpenedDb::open_in_memory(&crate::connection::TEST_STORAGE_KEY).unwrap())
     }
 
     #[test]
