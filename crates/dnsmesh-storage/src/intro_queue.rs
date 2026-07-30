@@ -298,7 +298,7 @@ mod tests {
     use super::*;
 
     fn queue() -> IntroQueue {
-        IntroQueue::new(OpenedDb::open_in_memory().unwrap())
+        IntroQueue::new(OpenedDb::open_in_memory(&crate::connection::TEST_STORAGE_KEY).unwrap())
     }
 
     fn sample(spk: u8, mid: u8) -> (Vec<u8>, Vec<u8>) {

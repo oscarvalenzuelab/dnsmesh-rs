@@ -135,26 +135,33 @@ impl DmpClient {
         let crypto = DmpCrypto::from_passphrase(&config.passphrase, config.kdf_salt.as_deref())?;
         let user_id = derive_user_id(&crypto.public_key_bytes());
 
+        // The sqlite file is SQLCipher-encrypted under a key derived from
+        // this identity's passphrase, so it is only readable while the
+        // identity is unlocked. Held in a Zeroizing wrapper and dropped as
+        // soon as the four connections are open.
+        let storage_key = crypto.derive_storage_key();
+
         // PrekeyStore + ContactStore each take their own Connection, so we
         // open the database twice. Sqlite under WAL handles cross-connection
         // locking for us; the cost is one fd per store, which is fine for the
         // lifetime of a client.
         let prekeys = match &config.db_path {
-            Some(path) => PrekeyStore::new(OpenedDb::open(path)?),
-            None => PrekeyStore::new(OpenedDb::open_in_memory()?),
+            Some(path) => PrekeyStore::new(OpenedDb::open(path, storage_key.as_ref())?),
+            None => PrekeyStore::new(OpenedDb::open_in_memory(storage_key.as_ref())?),
         };
         let contacts = match &config.db_path {
-            Some(path) => ContactStore::new(OpenedDb::open(path)?),
-            None => ContactStore::new(OpenedDb::open_in_memory()?),
+            Some(path) => ContactStore::new(OpenedDb::open(path, storage_key.as_ref())?),
+            None => ContactStore::new(OpenedDb::open_in_memory(storage_key.as_ref())?),
         };
         let replay_cache = match &config.db_path {
-            Some(path) => ReplayCache::new(OpenedDb::open(path)?),
-            None => ReplayCache::new(OpenedDb::open_in_memory()?),
+            Some(path) => ReplayCache::new(OpenedDb::open(path, storage_key.as_ref())?),
+            None => ReplayCache::new(OpenedDb::open_in_memory(storage_key.as_ref())?),
         };
         let intro_queue = match &config.db_path {
-            Some(path) => IntroQueue::new(OpenedDb::open(path)?),
-            None => IntroQueue::new(OpenedDb::open_in_memory()?),
+            Some(path) => IntroQueue::new(OpenedDb::open(path, storage_key.as_ref())?),
+            None => IntroQueue::new(OpenedDb::open_in_memory(storage_key.as_ref())?),
         };
+        drop(storage_key);
 
         Ok(Self {
             username: config.username,

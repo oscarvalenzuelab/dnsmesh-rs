@@ -173,7 +173,7 @@ mod tests {
     use super::*;
 
     fn cache() -> ReplayCache {
-        ReplayCache::new(OpenedDb::open_in_memory().unwrap())
+        ReplayCache::new(OpenedDb::open_in_memory(&crate::connection::TEST_STORAGE_KEY).unwrap())
     }
 
     #[test]
@@ -199,7 +199,10 @@ mod tests {
     #[test]
     fn record_with_default_ttl_expires_after_purge() {
         // Use TTL=0 so every record() is immediately stale.
-        let cache = ReplayCache::with_ttl(OpenedDb::open_in_memory().unwrap(), 0);
+        let cache = ReplayCache::with_ttl(
+            OpenedDb::open_in_memory(&crate::connection::TEST_STORAGE_KEY).unwrap(),
+            0,
+        );
         let spk = vec![5u8; 32];
         let mid = vec![6u8; 16];
         cache.record(&spk, &mid, None).unwrap();

@@ -35,4 +35,20 @@ pub enum StorageError {
         expected: usize,
         actual: usize,
     },
+    /// The storage key was not the expected length.
+    #[error("storage key must be {expected} bytes, got {actual}")]
+    InvalidStorageKeyLength { expected: usize, actual: usize },
+    /// The file on disk is an *unencrypted* database from a build that
+    /// predates at-rest encryption.
+    ///
+    /// Distinguished from a wrong key deliberately: SQLCipher reports both
+    /// as "file is not a database", but they need opposite responses. This
+    /// one is not recoverable by supplying different input — there is no
+    /// in-place upgrade path, so the caller should tell the user to
+    /// re-create the identity rather than re-prompt for a passphrase.
+    #[error(
+        "database at {path} is unencrypted (created before at-rest encryption); \
+         it cannot be upgraded in place"
+    )]
+    LegacyPlaintextDatabase { path: String },
 }

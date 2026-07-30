@@ -235,7 +235,7 @@ mod tests {
     use super::*;
 
     fn store() -> ContactStore {
-        ContactStore::new(OpenedDb::open_in_memory().unwrap())
+        ContactStore::new(OpenedDb::open_in_memory(&crate::connection::TEST_STORAGE_KEY).unwrap())
     }
 
     fn pk(b: u8) -> [u8; X25519_KEY_LEN] {
