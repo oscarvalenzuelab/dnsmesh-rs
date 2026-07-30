@@ -6,9 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dnsmesh_core::crypto::{derive_user_id, DmpCrypto};
+use dnsmesh_core::crypto::{derive_user_id, DmpCrypto, STORAGE_KEY_LEN};
 use dnsmesh_net::{DnsRecordReader, DnsRecordWriter};
 use dnsmesh_storage::{ContactStore, IntroQueue, OpenedDb, PrekeyStore, ReplayCache};
+use zeroize::Zeroizing;
 
 use crate::error::ClientError;
 
@@ -180,6 +181,20 @@ impl DmpClient {
     #[must_use]
     pub fn domain(&self) -> &str {
         &self.domain
+    }
+
+    /// Derive this identity's local at-rest storage key.
+    ///
+    /// Exposed so host applications can encrypt their own per-identity
+    /// files under the same key the SDK uses for local storage, instead of
+    /// inventing a second scheme. The desktop client needs this for its
+    /// persisted message history.
+    ///
+    /// See [`DmpCrypto::derive_storage_key`] for the derivation. The result
+    /// is zeroized on drop; don't persist it and don't put it on the wire.
+    #[must_use]
+    pub fn storage_key(&self) -> Zeroizing<[u8; STORAGE_KEY_LEN]> {
+        self.crypto.derive_storage_key()
     }
 
     /// Hex-encoded long-term X25519 public key.

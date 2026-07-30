@@ -25,6 +25,9 @@ base64 = "0.22"
 # for generating message IDs and shuffling prekey pools without going through
 # heavier helpers.
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Transitive via dnsmesh-core; direct so `storage_key()` can hand back a
+# Zeroizing wrapper rather than a bare array the caller might forget to wipe.
+zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }

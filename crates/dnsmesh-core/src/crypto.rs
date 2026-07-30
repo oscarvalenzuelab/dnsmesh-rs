@@ -15,7 +15,7 @@ use hkdf::Hkdf;
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Argon2id time cost (iterations) used by [`DmpCrypto::from_passphrase`].
 pub const ARGON2_TIME_COST: u32 = 2;
@@ -41,6 +41,17 @@ pub const DEFAULT_ARGON2_SALT: &[u8] = b"DMP-default-v2-argon2id";
 pub const HKDF_SALT: &[u8] = b"DMP-v1";
 /// HKDF info string for the message-encryption key derivation.
 pub const HKDF_INFO: &[u8] = b"DMP-Message-Encryption";
+/// HKDF info string for the local at-rest storage key.
+///
+/// Distinct from [`HKDF_INFO`] so the storage key and the message key are
+/// domain-separated even though both go through HKDF-SHA256 under
+/// [`HKDF_SALT`]. They also start from different input keying material —
+/// the storage key from the identity's own passphrase-derived seed, the
+/// message key from a per-message ECDH shared secret.
+pub const STORAGE_HKDF_INFO: &[u8] = b"DMP-Storage-At-Rest";
+
+/// Length of the derived at-rest storage key.
+pub const STORAGE_KEY_LEN: usize = 32;
 
 /// X25519 public/private key length.
 pub const X25519_KEY_LEN: usize = 32;
@@ -244,6 +255,30 @@ impl DmpCrypto {
     #[must_use]
     pub fn signing_public_key_bytes(&self) -> [u8; ED25519_KEY_LEN] {
         self.verifying_key.to_bytes()
+    }
+
+    /// Derive the local at-rest storage key for this identity.
+    ///
+    /// `HKDF-SHA256(ikm = private_seed, salt = HKDF_SALT, info =
+    /// STORAGE_HKDF_INFO)`. Used to encrypt data this identity keeps on the
+    /// local box — the sqlite database, the persisted message history —
+    /// none of which ever goes on the wire.
+    ///
+    /// Deterministic in the passphrase and the Argon2id salt, so the same
+    /// identity re-derives the same key on every unlock; there is nothing
+    /// extra to persist. It is *not* recoverable without the passphrase,
+    /// which is the point: this is what makes the passphrase an actual
+    /// confidentiality boundary rather than only a key-derivation input.
+    ///
+    /// Returned in a [`Zeroizing`] wrapper so the caller can't forget to
+    /// wipe it. Do not persist this value, and do not put it on the wire.
+    #[must_use]
+    pub fn derive_storage_key(&self) -> Zeroizing<[u8; STORAGE_KEY_LEN]> {
+        let mut key = Zeroizing::new([0u8; STORAGE_KEY_LEN]);
+        Hkdf::<Sha256>::new(Some(HKDF_SALT), &self.private_seed.0)
+            .expand(STORAGE_HKDF_INFO, key.as_mut())
+            .expect("32 bytes is within HKDF-SHA256's output length budget");
+        key
     }
 
     /// Sign `data` with the Ed25519 signing key. Returns a 64-byte signature.
@@ -584,6 +619,61 @@ mod tests {
         let b = DmpCrypto::from_passphrase("correct horse battery staple", Some(salt)).unwrap();
         assert_eq!(a.public_key_bytes(), b.public_key_bytes());
         assert_eq!(a.signing_public_key_bytes(), b.signing_public_key_bytes());
+    }
+
+    /// Same passphrase + same salt must re-derive the same storage key on
+    /// every unlock — otherwise yesterday's data can't be read today.
+    #[test]
+    fn storage_key_is_deterministic() {
+        let salt = b"deterministic-test-salt";
+        let a = DmpCrypto::from_passphrase("correct horse battery staple", Some(salt)).unwrap();
+        let b = DmpCrypto::from_passphrase("correct horse battery staple", Some(salt)).unwrap();
+        assert_eq!(*a.derive_storage_key(), *b.derive_storage_key());
+    }
+
+    /// A different passphrase, or the same passphrase under a different
+    /// per-identity salt, must yield an unrelated storage key.
+    #[test]
+    fn storage_key_varies_with_passphrase_and_salt() {
+        let salt = b"deterministic-test-salt";
+        let other_salt = b"a-different-test-salt";
+        let base = DmpCrypto::from_passphrase("correct horse battery staple", Some(salt)).unwrap();
+        let other_pass = DmpCrypto::from_passphrase("wrong horse", Some(salt)).unwrap();
+        let other_salt_same_pass =
+            DmpCrypto::from_passphrase("correct horse battery staple", Some(other_salt)).unwrap();
+
+        assert_ne!(*base.derive_storage_key(), *other_pass.derive_storage_key());
+        assert_ne!(
+            *base.derive_storage_key(),
+            *other_salt_same_pass.derive_storage_key(),
+        );
+    }
+
+    /// The storage key must not collide with any other key material derived
+    /// from the same seed — a leak of one must not hand over the others.
+    #[test]
+    fn storage_key_is_domain_separated_from_identity_keys() {
+        let crypto =
+            DmpCrypto::from_passphrase("hunter2hunter2", Some(b"separation-salt")).unwrap();
+        let storage = crypto.derive_storage_key();
+        assert_ne!(*storage, crypto.private_key_bytes());
+        assert_ne!(*storage, crypto.public_key_bytes());
+        assert_ne!(*storage, crypto.signing_public_key_bytes());
+    }
+
+    /// Locks the derivation against accidental change: the info string is
+    /// part of the on-disk contract, so altering it silently orphans every
+    /// existing encrypted file.
+    #[test]
+    fn storage_key_matches_explicit_hkdf() {
+        let crypto =
+            DmpCrypto::from_passphrase("hunter2hunter2", Some(b"separation-salt")).unwrap();
+        let mut expected = [0u8; STORAGE_KEY_LEN];
+        Hkdf::<Sha256>::new(Some(HKDF_SALT), &crypto.private_key_bytes())
+            .expand(STORAGE_HKDF_INFO, &mut expected)
+            .unwrap();
+        assert_eq!(*crypto.derive_storage_key(), expected);
+        assert_eq!(STORAGE_HKDF_INFO, b"DMP-Storage-At-Rest");
     }
 
     #[test]
