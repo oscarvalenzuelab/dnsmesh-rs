@@ -50,6 +50,33 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// One provider zone whose claim record could not be published.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimFailure {
+    pub provider_zone: String,
+    pub reason: String,
+}
+
+/// Outcome of [`DmpClient::send_message_with_claim`].
+///
+/// A non-empty `claim_failures` means the message was delivered but is not
+/// discoverable through those zones, so a recipient who has not pinned the
+/// sender will never see it. That is a partial success and callers are
+/// expected to surface it.
+#[derive(Debug, Clone)]
+pub struct ClaimSend {
+    pub msg_id: [u8; 16],
+    pub claim_failures: Vec<ClaimFailure>,
+}
+
+impl ClaimSend {
+    /// True when every requested provider zone accepted the claim.
+    #[must_use]
+    pub fn all_claims_published(&self) -> bool {
+        self.claim_failures.is_empty()
+    }
+}
+
 impl DmpClient {
     /// Sign and publish a single [`ClaimRecord`] addressed to
     /// `recipient_id` at `provider_zone`.
@@ -115,12 +142,17 @@ impl DmpClient {
     /// failure, message itself proceeds.
     ///
     /// Returns the same 16-byte `msg_id` as [`Self::send_message`].
+    /// The message itself is delivered even when a claim fails to publish;
+    /// the claim only affects whether an un-pinned recipient can *discover*
+    /// it. Failures are returned rather than logged and dropped, because
+    /// the caller asked for those providers explicitly and a silent no-op
+    /// looks identical to success.
     pub async fn send_message_with_claim(
         &self,
         recipient_username: &str,
         plaintext: &[u8],
         provider_zones: &[&str],
-    ) -> Result<[u8; 16], ClientError> {
+    ) -> Result<ClaimSend, ClientError> {
         let msg_id = self.send_message(recipient_username, plaintext).await?;
         // Re-derive the recipient_id from the contact store so we can
         // emit the claim under the right routing label.
@@ -149,6 +181,7 @@ impl DmpClient {
             ))
         })?;
         let exp = unix_now().saturating_add(DEFAULT_TTL_SECONDS);
+        let mut claim_failures = Vec::new();
         for zone in provider_zones {
             match self
                 .publish_claim(&recipient_id, slot, &msg_id, exp, zone)
@@ -156,14 +189,30 @@ impl DmpClient {
             {
                 Ok(true) => {}
                 Ok(false) => {
+                    // The writer declined without erroring. In practice this
+                    // is a zone the configured TSIG key has no authority
+                    // over, which is the common case when the provider zone
+                    // belongs to a node you have not registered with.
                     tracing::warn!(provider = zone, "claim publish reported writer-no-op");
+                    claim_failures.push(ClaimFailure {
+                        provider_zone: (*zone).to_string(),
+                        reason: "the configured publish credentials cannot write to this zone"
+                            .to_string(),
+                    });
                 }
                 Err(e) => {
                     tracing::warn!(provider = zone, error = %e, "claim publish failed");
+                    claim_failures.push(ClaimFailure {
+                        provider_zone: (*zone).to_string(),
+                        reason: e.to_string(),
+                    });
                 }
             }
         }
-        Ok(msg_id)
+        Ok(ClaimSend {
+            msg_id,
+            claim_failures,
+        })
     }
 
     /// Walk every claim slot at `provider_zone` for messages addressed

@@ -9,7 +9,7 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use dnsmesh_client::ClientError;
+use dnsmesh_client::{ClaimSend, ClientError};
 use dnsmesh_core::identity::parse_address;
 
 use crate::cli::SendArgs;
@@ -62,8 +62,16 @@ pub async fn run(
         warn_cross_zone_first_contact(&recipient_addr, client.domain());
     }
 
+    // Two shapes of result, unified below: a plain send yields just a
+    // msg_id, a claim send also reports which provider zones refused.
     let send_result = if args.claim_via.is_empty() {
-        client.send_message(&recipient_username, &body).await
+        client
+            .send_message(&recipient_username, &body)
+            .await
+            .map(|msg_id| ClaimSend {
+                msg_id,
+                claim_failures: Vec::new(),
+            })
     } else {
         // The client API takes &[&str]; flatten the owned Vec<String>
         // into refs without an extra allocation per element.
@@ -92,13 +100,42 @@ pub async fn run(
             );
         }
     }
-    let msg_id = if args.claim_via.is_empty() {
+    let sent = if args.claim_via.is_empty() {
         send_result.with_context(|| format!("sending to {recipient_addr}"))?
     } else {
         send_result.with_context(|| format!("sending to {recipient_addr} via claim"))?
     };
-    println!("{}", hex::encode(msg_id));
+    println!("{}", hex::encode(sent.msg_id));
     maybe_flush(&built).await?;
+
+    // The message went out, but a claim that did not publish means an
+    // un-pinned recipient has no way to discover it. Saying nothing here
+    // is indistinguishable from success, which is how this went unnoticed:
+    // the msg_id above prints either way.
+    if !sent.all_claims_published() {
+        eprintln!(
+            "\nwarning: the message was delivered, but {} of {} claim record(s) \
+             could not be published.",
+            sent.claim_failures.len(),
+            args.claim_via.len(),
+        );
+        for f in &sent.claim_failures {
+            eprintln!("  {}: {}", f.provider_zone, f.reason);
+        }
+        eprintln!(
+            "A recipient who has not already pinned you will NOT find this \
+             message.\nPublishing a claim into a zone needs credentials for \
+             that zone: run `dnsmesh tsig register --node <host>` for the \
+             node serving it, or ask the recipient to pin you with\n  \
+             dnsmesh contacts add {}@{}",
+            client.username(),
+            client.domain(),
+        );
+        return Err(anyhow!(
+            "claim publish failed for {} provider zone(s)",
+            sent.claim_failures.len()
+        ));
+    }
     Ok(())
 }
 
