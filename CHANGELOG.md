@@ -13,6 +13,38 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-31 - failed publishes say why
+
+### Breaking
+
+- `NetError` gains an `UpdateRejected` variant. Exhaustive matches on
+  `NetError` need updating.
+- A DNS UPDATE the server refuses now returns `Err(NetError::UpdateRejected)`
+  rather than `Ok(false)`. Callers treating `Ok(false)` as the rejection
+  signal need to handle the error instead. `Ok(false)` still means a genuine
+  no-op, such as a name the writer cannot assemble because it falls outside
+  the configured zone.
+
+### Fixed
+
+- Publish failures report the cause. Both failure paths, a non-zero RCODE
+  and a transport or TSIG authentication failure, were flattened to
+  `Ok(false)` with the reason left in a log line users never see. A wrong
+  TSIG secret, a name outside the key's scope, clock skew and an
+  unreachable server produced identical output, so the failure could not be
+  diagnosed from what the user saw:
+
+  ```
+  publish failed for identity at id-72be077335bba5cc.dmp.dnsmesh.io
+  ```
+
+  The same failure now reads:
+
+  ```
+  <server> rejected the DNS UPDATE for id-...: proto error: missing tsig
+  from response that must be authenticated
+  ```
+
 ## [0.3.0] - 2026-07-31 - claim failures are reported
 
 ### Breaking
