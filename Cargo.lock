@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "base64",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-ffi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dnsmesh-client",
  "dnsmesh-core",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-net"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "dnsmesh-core",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "dnsmesh-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dnsmesh-core",
  "hex",
