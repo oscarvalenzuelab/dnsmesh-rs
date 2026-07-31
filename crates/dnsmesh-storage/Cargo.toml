@@ -16,6 +16,13 @@ dnsmesh-core = { path = "../dnsmesh-core" }
 # `vendored-openssl` builds OpenSSL from source, which keeps cross-compiles
 # self-contained — see the Android note in the release workflow.
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+# Held at the 3.5 series on purpose. OpenSSL 3.6 emits SM4 AVX instructions
+# (vsm4key4, vsm4rnds4) in crypto/sm4/sm4-x86_64.S, and the NDK r26 clang
+# assembler does not know them, so the x86_64-linux-android build dies with
+# "invalid instruction mnemonic". Nothing here uses SM4; the pin exists
+# solely so the Android APK can be built. Revisit when the NDK ships a newer
+# assembler, and check the x86_64 Android build before lifting it.
+openssl-src = "=300.5.2"
 refinery = { version = "0.8", features = ["rusqlite"] }
 parking_lot = "0.12"
 thiserror = "2"
