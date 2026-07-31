@@ -19,6 +19,7 @@ pub(crate) mod rotation_chain;
 pub mod send;
 pub mod unpublish;
 
+pub use claim::{ClaimFailure, ClaimSend};
 pub use client::{DmpClient, DmpClientConfig};
 pub use contacts::Contact;
 pub use error::ClientError;

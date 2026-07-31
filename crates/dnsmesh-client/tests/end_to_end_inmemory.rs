@@ -635,7 +635,7 @@ async fn send_message_with_claim_publishes_both_manifest_and_claim() {
     alice.add_contact(bob_contact.clone()).await.unwrap();
 
     let provider_zone = "provider.example.com";
-    let msg_id = alice
+    let sent = alice
         .send_message_with_claim(
             "bob-claim-pub",
             b"hello via claim provider",
@@ -643,6 +643,12 @@ async fn send_message_with_claim_publishes_both_manifest_and_claim() {
         )
         .await
         .unwrap();
+    assert!(
+        sent.all_claims_published(),
+        "in-memory writer accepts every zone, so no claim should fail: {:?}",
+        sent.claim_failures,
+    );
+    let msg_id = sent.msg_id;
 
     // Manifest still lands at the sender's mailbox slot (alice is the
     // sender; recipient_id is derived from bob's X25519 PK; alice
@@ -1239,4 +1245,90 @@ impl ClientBytes for DmpClient {
         a.copy_from_slice(&v);
         a
     }
+}
+
+/// A claim the writer refuses must be reported, not swallowed.
+///
+/// This is the shape of the real failure: a TSIG key scoped to one zone
+/// cannot write a claim into another node's zone. The writer declines
+/// without erroring, and the send used to return a message id as though
+/// everything had worked, so an un-pinned recipient silently never saw the
+/// message.
+#[tokio::test]
+async fn claim_failures_are_reported_not_swallowed() {
+    /// Accepts the manifest and chunks, refuses anything that looks like a
+    /// claim record, mirroring an out-of-zone DNS UPDATE being declined.
+    #[derive(Debug)]
+    struct RefusesClaims {
+        inner: Arc<InMemoryDnsStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl DnsRecordWriter for RefusesClaims {
+        async fn publish_txt_record(
+            &self,
+            name: &str,
+            value: &str,
+            ttl: u32,
+        ) -> Result<bool, dnsmesh_net::NetError> {
+            if name.starts_with("claim-") || name.starts_with("_dnsmesh-claim") {
+                // Declined, not an error: exactly what the real writer does
+                // when the name falls outside the TSIG key's zone.
+                return Ok(false);
+            }
+            self.inner.publish_txt_record(name, value, ttl).await
+        }
+
+        async fn delete_txt_record(
+            &self,
+            name: &str,
+            value: Option<&str>,
+        ) -> Result<bool, dnsmesh_net::NetError> {
+            self.inner.delete_txt_record(name, value).await
+        }
+    }
+
+    let store = Arc::new(InMemoryDnsStore::new());
+    let bob = make_client("bob-claim-refused", store.clone()).await;
+    bob.publish_identity(false).await.unwrap();
+    bob.refresh_prekeys(5, 3600).await.unwrap();
+
+    let writer = Arc::new(RefusesClaims {
+        inner: store.clone(),
+    });
+    let alice = DmpClient::new(DmpClientConfig {
+        username: "alice-claim-refused".to_string(),
+        passphrase: "passphrase-for-alice-claim-refused".to_string(),
+        domain: "mesh.local".to_string(),
+        kdf_salt: Some(salt("alice-claim-refused")),
+        db_path: None,
+        writer,
+        reader: store.clone(),
+        rotation_chain_enabled: false,
+    })
+    .await
+    .unwrap();
+    alice.publish_identity(false).await.unwrap();
+
+    let bob_contact = alice
+        .fetch_identity("bob-claim-refused@mesh.local")
+        .await
+        .unwrap();
+    alice.add_contact(bob_contact).await.unwrap();
+
+    let sent = alice
+        .send_message_with_claim("bob-claim-refused", b"body", &["provider.example.com"])
+        .await
+        .expect("the message itself still goes out");
+
+    assert!(
+        !sent.all_claims_published(),
+        "a refused claim must not report success",
+    );
+    assert_eq!(sent.claim_failures.len(), 1);
+    assert_eq!(sent.claim_failures[0].provider_zone, "provider.example.com",);
+    assert!(
+        !sent.claim_failures[0].reason.is_empty(),
+        "a failure needs a reason the caller can show the user",
+    );
 }
