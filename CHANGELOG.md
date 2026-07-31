@@ -13,6 +13,23 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-30 - Android build fix
+
+Build fix only. No API or behaviour change from 0.2.0.
+
+### Fixed
+
+- The x86_64 Android build works again. OpenSSL 3.6 emits SM4 AVX
+  instructions in `crypto/sm4/sm4-x86_64.S` and the NDK r26 clang
+  assembler does not know them, so building vendored OpenSSL for
+  `x86_64-linux-android` failed with "invalid instruction mnemonic
+  'vsm4key4'". Nothing here uses SM4, so `openssl-src` is held at the 3.5
+  series, where the file does not exist to fail on. The pin is declared
+  in `Cargo.toml` rather than left to the lockfile so a routine
+  `cargo update` cannot quietly undo it. Worth lifting once the NDK ships
+  a newer assembler; check the x86_64 Android build before doing so,
+  since CI does not cover Android.
+
 ## [0.2.0] - 2026-07-30 - encryption at rest
 
 The local database is now encrypted. This is a breaking release in two
