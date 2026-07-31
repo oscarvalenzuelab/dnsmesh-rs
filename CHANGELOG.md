@@ -13,6 +13,33 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-31 - claim failures are reported
+
+### Breaking
+
+- `DmpClient::send_message_with_claim` returns `ClaimSend` instead of
+  `[u8; 16]`. The message id moves to `.msg_id`; `.claim_failures` lists
+  the provider zones that refused, with a reason for each.
+
+### Fixed
+
+- Claim publish failures are no longer swallowed. The method logged a
+  warning and returned `Ok(msg_id)` whether the claim published or not, so
+  no caller could tell the difference and the message id printed either
+  way. A claim that does not publish means an un-pinned recipient never
+  discovers the message, and cross-zone sends hit this every time: a TSIG
+  key scoped to one zone cannot write a claim into another node's zone, the
+  writer declines without erroring, and the send looked entirely
+  successful.
+
+  The message itself is still delivered, so this is a partial success
+  rather than an error at the SDK layer, and callers decide how loud to be.
+
+- `dnsmesh send --claim-via` prints which zones refused and why, says
+  plainly that an un-pinned recipient will not find the message, suggests
+  registering with the node serving that zone, and exits non-zero so
+  scripts notice. Same-zone sends are unchanged.
+
 ## [0.2.1] - 2026-07-30 - Android build fix
 
 Build fix only. No API or behaviour change from 0.2.0.
