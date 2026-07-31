@@ -187,8 +187,14 @@ impl DnsUpdateWriter {
         Ok(msg)
     }
 
-    /// UDP-first, TCP-on-truncation send. Returns `Ok(true)` on a
-    /// signed NOERROR response, `Ok(false)` otherwise.
+    /// UDP-first, TCP-on-truncation send.
+    ///
+    /// `Ok(true)` on a signed NOERROR response. Transport and TSIG
+    /// authentication failures come back as errors carrying the cause: they
+    /// used to be flattened to `Ok(false)`, which surfaced to the user as a
+    /// bare "publish failed" with the actual reason only in a log line they
+    /// would never see. A wrong TSIG secret and an unreachable server looked
+    /// identical.
     async fn send(&self, message: Message, op: &str, name: &str) -> Result<bool, NetError> {
         let signer = self.tsig_key.to_signer(self.fudge_secs)?;
         // First attempt: UDP.
@@ -208,19 +214,31 @@ impl DnsUpdateWriter {
                     Ok(resp) => resp,
                     Err(e) => {
                         tracing::warn!("DNS UPDATE TCP retry for {}/{} failed: {}", op, name, e);
-                        return Ok(false);
+                        return Err(NetError::UpdateRejected {
+                            name: name.to_string(),
+                            server: self.server.to_string(),
+                            rcode: format!("TCP retry failed: {e}"),
+                        });
                     }
                 }
             }
             UdpOutcome::Failed(e) => {
                 tracing::warn!("DNS UPDATE UDP for {}/{} failed: {}", op, name, e);
-                return Ok(false);
+                return Err(NetError::UpdateRejected {
+                    name: name.to_string(),
+                    server: self.server.to_string(),
+                    rcode: e.clone(),
+                });
             }
         };
         let rcode = response.response_code();
         if rcode == hickory_proto::op::ResponseCode::NoError {
             Ok(true)
         } else {
+            // Surfaced as an error rather than a bare `false`. The RCODE is
+            // the only thing that distinguishes a rejected TSIG key from an
+            // out-of-scope name or clock skew, and dropping it left callers
+            // reporting "publish failed" with nothing to act on.
             tracing::info!(
                 "DNS UPDATE {} for {} rejected by {}: rcode={}",
                 op,
@@ -228,7 +246,11 @@ impl DnsUpdateWriter {
                 self.server,
                 rcode
             );
-            Ok(false)
+            Err(NetError::UpdateRejected {
+                name: name.to_string(),
+                server: self.server.to_string(),
+                rcode: rcode.to_string(),
+            })
         }
     }
 
