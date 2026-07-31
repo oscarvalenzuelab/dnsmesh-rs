@@ -22,6 +22,10 @@ dnsmesh-core = { path = "../dnsmesh-core" }
 # fit mobile threat models).
 dnsmesh-net = { path = "../dnsmesh-net", features = ["cloudflare"] }
 dnsmesh-storage = { path = "../dnsmesh-storage" }
+# Only to name the sqlite error code when explaining a failed open. Feature
+# unification makes this the same SQLCipher-linked build the storage crate
+# already uses.
+rusqlite = "0.32"
 dnsmesh-client = { path = "../dnsmesh-client" }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-std", "io-util"] }

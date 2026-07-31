@@ -648,6 +648,7 @@ dependencies = [
  "predicates",
  "reqwest",
  "rpassword",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
