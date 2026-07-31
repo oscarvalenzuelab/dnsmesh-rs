@@ -13,6 +13,62 @@ breaking wire-format changes there will be reflected here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30 - encryption at rest
+
+The local database is now encrypted. This is a breaking release in two
+ways: the storage API changed, and databases written by earlier versions
+cannot be opened.
+
+### Breaking
+
+- `OpenedDb::open` and `OpenedDb::open_in_memory` now take the storage
+  key. Callers that open the database directly need to pass it; going
+  through `DmpClient` requires no change, since it derives the key
+  itself.
+- Databases created before this release cannot be opened. There is no
+  in-place upgrade path. `OpenedDb::open` recognises a plaintext file and
+  returns `StorageError::LegacyPlaintextDatabase` so callers can say
+  "recreate the identity" rather than reporting corruption.
+- `dnsmesh-storage` links SQLCipher with vendored OpenSSL instead of
+  plain bundled sqlite. Cross-compiling for Android needs
+  `RANLIB_<target>=llvm-ranlib`: NDK r23 and later dropped the
+  per-triple ranlib shims that OpenSSL's build system looks for.
+
+### Added
+
+- `DmpCrypto::derive_storage_key`, HKDF-SHA256 over the passphrase-derived
+  seed under a new `DMP-Storage-At-Rest` domain separator. Domain
+  separated from both the messaging key and the signing key.
+- `DmpClient::storage_key`, so host applications can encrypt their own
+  per-identity files under the same key rather than inventing a second
+  scheme.
+- `StorageError::LegacyPlaintextDatabase` and
+  `StorageError::InvalidStorageKeyLength`.
+
+### Changed
+
+- The database is opened with the raw-key pragma, so SQLCipher uses the
+  32 bytes directly instead of running its own PBKDF2 over them. The key
+  is already an HKDF output over an Argon2id seed, and there are four
+  connections per client, so a second stretching pass would cost latency
+  for nothing.
+- Opening now probes `sqlite_master` immediately. `PRAGMA key` never
+  fails on its own, so without the probe a bad key surfaced at some
+  arbitrary later query instead of at open time.
+- The CLI explains a failed open. A wrong passphrase used to print
+  "file is not a database", which reads like corruption when it is
+  almost always a typo.
+- `dnsmesh init` removes the database it created if the run fails before
+  the salt reaches `config.yaml`. The database is keyed by that salt, so
+  an interrupted init used to leave a file that nothing could ever open,
+  and the next init would fail on it with no hint to delete it.
+
+### Notes
+
+Wire format is unchanged. This release only affects local storage, so it
+does not break interoperability with the Python reference or with peers
+running earlier versions.
+
 ## [0.1.3] — 2026-05-15 — CLI quality-of-life
 
 CLI-only release. SDK code is unchanged from 0.1.2; the desktop
