@@ -158,7 +158,7 @@ pub async fn build_client(cfg: &ResolvedConfig, source: PassphraseSource) -> Res
     };
     let client = DmpClient::new(client_cfg)
         .await
-        .context("constructing DmpClient")?;
+        .map_err(explain_open_failure)?;
     Ok(BuiltClient {
         client,
         publish_configured,
@@ -609,5 +609,34 @@ fn warn_if_tsig_file_world_readable(path: &std::path::Path) {
     #[cfg(not(unix))]
     {
         let _ = path;
+    }
+}
+
+/// Turn a client-construction failure into something a user can act on.
+///
+/// The database is encrypted with a key derived from the passphrase, so the
+/// overwhelmingly common cause of a failed open is a typo. SQLCipher cannot
+/// distinguish that from a damaged file and reports both as "file is not a
+/// database", which on its own reads like corruption and sends people
+/// looking in the wrong place.
+fn explain_open_failure(err: dnsmesh_client::ClientError) -> anyhow::Error {
+    use dnsmesh_storage::StorageError;
+    match &err {
+        dnsmesh_client::ClientError::Storage(StorageError::LegacyPlaintextDatabase { path }) => {
+            anyhow!(
+                "the database at {path} was created before at-rest encryption and \
+             cannot be opened by this build. There is no in-place upgrade: \
+             move it aside and create the identity again."
+            )
+        }
+        dnsmesh_client::ClientError::Storage(StorageError::Sqlite(e))
+            if e.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase) =>
+        {
+            anyhow!(
+                "could not open the identity database: wrong passphrase, or the \
+                 file is damaged"
+            )
+        }
+        _ => anyhow::Error::new(err).context("constructing DmpClient"),
     }
 }
