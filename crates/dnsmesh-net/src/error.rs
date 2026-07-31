@@ -27,6 +27,16 @@ pub enum NetError {
     #[error("no resolver returned a usable answer")]
     NoUsableAnswer,
     /// An authoritative write backend rejected the request.
+    /// The authoritative server answered a DNS UPDATE with a non-zero
+    /// RCODE. Carries the code so callers can tell a rejected TSIG key
+    /// (NOTAUTH), an out-of-scope name (REFUSED) and clock skew (BADTIME)
+    /// apart, instead of reporting an unqualified failure.
+    #[error("{server} rejected the DNS UPDATE for {name}: {rcode}")]
+    UpdateRejected {
+        name: String,
+        server: String,
+        rcode: String,
+    },
     #[error("authoritative write failed: {0}")]
     WriteFailed(String),
     /// A lower-level DNS protocol error escaped a backend that didn't translate it.
