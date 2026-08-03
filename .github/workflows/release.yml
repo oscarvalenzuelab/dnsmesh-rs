@@ -64,9 +64,35 @@ jobs:
           fi
           echo "OK: workspace.version=$ws_version matches tag"
 
+  # Create the release once, before any build can try to. Six build jobs
+  # finishing together each attempted their own create, GitHub answered all
+  # but the first with `already_exists`, and the upload action retried until
+  # it gave up. cli-v0.4.0 shipped without its macOS binary that way: the
+  # build succeeded and only the upload failed.
+  #
+  # With the release guaranteed to exist first, the uploads only ever attach
+  # assets and nothing races.
+  create_release:
+    name: create release
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+            exit 0
+          fi
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" --generate-notes
+
   build:
     name: build (${{ matrix.target }})
-    needs: validate
+    needs: [validate, create_release]
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.validate.outputs.version }}
@@ -311,27 +337,9 @@ jobs:
       # action-gh-release pinned to the v2.6.2 SHA — major-tag drift could
       # silently inject changed behavior on the runner that already holds
       # GITHUB_TOKEN. Bump deliberately when a new version is wanted.
-      - name: Stagger release creation
-        # See the note on the upload step. Deterministic per target so two
-        # jobs never pick the same delay.
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="${{ matrix.target }}"
-          delay=$(( $(printf '%s' "$target" | cksum | cut -d' ' -f1) % 25 ))
-          echo "waiting ${delay}s so the release is created once, not six times"
-          sleep "$delay"
-
       - name: Upload to GH Release
-        # Six build jobs finish at roughly the same time and each tries to
-        # create the release. GitHub answers all but the first with
-        # `already_exists`, and the action retried that until it gave up,
-        # so a target could build cleanly and still never upload. It cost
-        # cli-v0.4.0 its macOS binary.
-        #
-        # A short jittered wait keyed to the matrix index spreads the
-        # creates far enough apart that the first one wins outright and the
-        # rest find the release already there.
+        # `create_release` guarantees the release exists, so this only ever
+        # attaches assets.
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
