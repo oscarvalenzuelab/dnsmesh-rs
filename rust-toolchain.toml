@@ -1,3 +1,12 @@
+# Pinned rather than tracking `stable`, so a new Rust release cannot turn every
+# open branch red at once. That happened on 2026-09-07: clippy 1.98 added
+# unused_async_trait_impl, and `channel = "stable"` picked it up the moment it
+# shipped, failing main and every PR for a reason unrelated to any of them.
+#
+# Bump this deliberately. When you do, run `cargo clippy --workspace
+# --all-targets` first — a new toolchain routinely adds lints, and the point of
+# pinning is that the fallout lands in one intentional PR rather than in
+# whatever unrelated change happens to be open that day.
 [toolchain]
-channel = "stable"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]
