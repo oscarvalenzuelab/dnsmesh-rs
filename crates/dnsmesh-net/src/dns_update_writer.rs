@@ -27,18 +27,19 @@
 //! coupling the writer to a particular pool implementation.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hickory_client::client::Client;
+use hickory_net::client::Client;
+use hickory_net::runtime::TokioRuntimeProvider;
+use hickory_net::tcp::TcpClientStream;
+use hickory_net::udp::UdpClientStream;
+use hickory_net::DnsHandle;
+use hickory_net::DnsMultiplexer;
+use hickory_proto::op::DnsResponse;
 use hickory_proto::op::{Message, MessageType, OpCode, Query};
 use hickory_proto::rr::rdata::TXT;
-use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordSet, RecordType};
-use hickory_proto::runtime::TokioRuntimeProvider;
-use hickory_proto::tcp::TcpClientStream;
-use hickory_proto::udp::UdpClientStream;
-use hickory_proto::xfer::{DnsHandle, DnsResponse};
+use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordSet, RecordType, TSigner};
 
 use crate::base::DnsRecordWriter;
 use crate::error::NetError;
@@ -142,8 +143,8 @@ impl DnsUpdateWriter {
             });
         }
         let txt = TXT::new(vec![value.to_string()]);
-        let mut record = Record::from_rdata(owner, ttl, RData::TXT(txt));
-        record.set_dns_class(DNSClass::IN);
+        // 0.26's Record::from_rdata already defaults dns_class to IN.
+        let record = Record::from_rdata(owner, ttl, RData::TXT(txt));
         let rrset: RecordSet = record.into();
         // `append` with `must_exist=false` is "add to RRset, creating it if absent" — the
         // RFC 2136 §2.5.1 additive add, with no prerequisite. Hickory's `create()` would
@@ -178,8 +179,7 @@ impl DnsUpdateWriter {
             Some(v) => {
                 // Delete a specific TXT RR.
                 let txt = TXT::new(vec![v.to_string()]);
-                let mut record = Record::from_rdata(owner, 0, RData::TXT(txt));
-                record.set_dns_class(DNSClass::IN);
+                let record = Record::from_rdata(owner, 0, RData::TXT(txt));
                 let rrset: RecordSet = record.into();
                 hickory_proto::op::update_message::delete_by_rdata(rrset, self.zone.clone(), true)
             }
@@ -231,7 +231,7 @@ impl DnsUpdateWriter {
                 });
             }
         };
-        let rcode = response.response_code();
+        let rcode = response.response_code;
         if rcode == hickory_proto::op::ResponseCode::NoError {
             Ok(true)
         } else {
@@ -257,17 +257,14 @@ impl DnsUpdateWriter {
     async fn send_udp(
         &self,
         message: &Message,
-        signer: Arc<dyn hickory_proto::op::MessageFinalizer>,
+        signer: TSigner,
         provider: TokioRuntimeProvider,
     ) -> UdpOutcome {
         let conn = UdpClientStream::builder(self.server, provider)
             .with_timeout(Some(self.timeout))
             .with_signer(Some(signer))
             .build();
-        let (mut client, bg) = match Client::connect(conn).await {
-            Ok(pair) => pair,
-            Err(e) => return UdpOutcome::Failed(e.to_string()),
-        };
+        let (mut client, bg) = Client::from_sender(conn);
         let bg_handle = tokio::spawn(bg);
         let result = run_update(&mut client, message.clone(), self.timeout).await;
         // Drop the client handle before awaiting the background — that
@@ -277,7 +274,7 @@ impl DnsUpdateWriter {
         let _ = bg_handle.await;
         match result {
             Ok(resp) => {
-                if resp.truncated() {
+                if resp.truncation {
                     UdpOutcome::Truncated
                 } else {
                     UdpOutcome::Ok(resp)
@@ -290,14 +287,16 @@ impl DnsUpdateWriter {
     async fn send_tcp(
         &self,
         message: &Message,
-        signer: Arc<dyn hickory_proto::op::MessageFinalizer>,
+        signer: TSigner,
         provider: TokioRuntimeProvider,
     ) -> Result<DnsResponse, String> {
         let (connect, sender) =
             TcpClientStream::new(self.server, None, Some(self.timeout), provider);
-        let (mut client, bg) = Client::with_timeout(connect, sender, self.timeout, Some(signer))
-            .await
-            .map_err(|e| e.to_string())?;
+        let stream = connect.await.map_err(|e| e.to_string())?;
+        let multiplexer = DnsMultiplexer::new(stream, sender)
+            .with_timeout(self.timeout)
+            .with_signer(signer);
+        let (mut client, bg) = Client::from_sender(multiplexer);
         let bg_handle = tokio::spawn(bg);
         let result = run_update(&mut client, message.clone(), self.timeout).await;
         drop(client);
@@ -318,12 +317,12 @@ enum UdpOutcome {
 /// AXFR / IXFR which are streaming responses. For an UPDATE we expect
 /// exactly one response and treat anything else as failure.
 async fn run_update(
-    client: &mut Client,
+    client: &mut Client<TokioRuntimeProvider>,
     message: Message,
     timeout: Duration,
 ) -> Result<DnsResponse, String> {
     use futures_util::stream::StreamExt as _;
-    use hickory_proto::xfer::{DnsRequest, DnsRequestOptions};
+    use hickory_proto::op::{DnsRequest, DnsRequestOptions};
 
     // Convert our pre-built UPDATE into a request the multiplexer can drive.
     let opts = DnsRequestOptions::default();
@@ -409,10 +408,8 @@ fn build_zone_query(zone: &Name) -> Query {
 /// reference; not on any code path.
 #[allow(dead_code)]
 fn fresh_update_message() -> Message {
-    let mut m = Message::new();
-    m.set_message_type(MessageType::Query)
-        .set_op_code(OpCode::Update)
-        .set_recursion_desired(false);
+    let mut m = Message::new(0, MessageType::Query, OpCode::Update);
+    m.metadata.recursion_desired = false;
     m
 }
 
@@ -487,15 +484,15 @@ mod tests {
         let bytes = msg.to_vec().expect("serialize");
         let parsed = Message::from_vec(&bytes).expect("parse");
         // Zone Query: name=example.com, type=SOA.
-        assert_eq!(parsed.queries().len(), 1);
-        assert_eq!(parsed.queries()[0].query_type(), RecordType::SOA);
-        assert!(parsed.queries()[0]
-            .name()
+        assert_eq!(parsed.queries.len(), 1);
+        assert_eq!(parsed.queries[0].query_type(), RecordType::SOA);
+        assert!(parsed.queries[0]
+            .name
             .to_ascii()
             .to_lowercase()
             .starts_with("example.com"));
         // Updates section ("name servers" in hickory-speak): our TXT add.
-        let updates = parsed.name_servers();
+        let updates = &parsed.authorities;
         // The exact count varies between hickory versions because
         // `update_message::create` also emits a prerequisite. Find the
         // TXT update by hand.
@@ -503,14 +500,14 @@ mod tests {
             .iter()
             .find(|r| r.record_type() == RecordType::TXT)
             .expect("TXT update record present");
-        assert_eq!(txt_update.ttl(), 600);
+        assert_eq!(txt_update.ttl, 600);
         assert!(txt_update
-            .name()
+            .name
             .to_ascii()
             .to_lowercase()
             .starts_with("alice.example.com"));
-        if let RData::TXT(txt) = txt_update.data() {
-            let bytes = &txt.txt_data()[0];
+        if let RData::TXT(txt) = &txt_update.data {
+            let bytes = &txt.txt_data[0];
             assert_eq!(&bytes[..], b"v=dmp1;t=identity;data");
         } else {
             panic!("expected RData::TXT");
@@ -544,14 +541,14 @@ mod tests {
             .unwrap();
         let bytes = msg.to_vec().expect("serialize");
         let parsed = Message::from_vec(&bytes).expect("parse");
-        let updates = parsed.name_servers();
+        let updates = &parsed.authorities;
         let any_txt = updates
             .iter()
             .find(|r| r.record_type() == RecordType::TXT)
             .expect("delete TXT update record present");
         // Whole-RRset delete: CLASS must be ANY, TTL 0.
-        assert_eq!(any_txt.dns_class(), DNSClass::ANY);
-        assert_eq!(any_txt.ttl(), 0);
+        assert_eq!(any_txt.dns_class, DNSClass::ANY);
+        assert_eq!(any_txt.ttl, 0);
     }
 
     #[test]
@@ -567,16 +564,16 @@ mod tests {
             .unwrap();
         let bytes = msg.to_vec().expect("serialize");
         let parsed = Message::from_vec(&bytes).expect("parse");
-        let updates = parsed.name_servers();
+        let updates = &parsed.authorities;
         let txt_delete = updates
             .iter()
             .find(|r| r.record_type() == RecordType::TXT)
             .expect("TXT delete record present");
         // Specific-RR delete: CLASS must be NONE, TTL 0, rdata matches.
-        assert_eq!(txt_delete.dns_class(), DNSClass::NONE);
-        assert_eq!(txt_delete.ttl(), 0);
-        if let RData::TXT(txt) = txt_delete.data() {
-            assert_eq!(&txt.txt_data()[0][..], b"v=dmp1;t=identity;data");
+        assert_eq!(txt_delete.dns_class, DNSClass::NONE);
+        assert_eq!(txt_delete.ttl, 0);
+        if let RData::TXT(txt) = &txt_delete.data {
+            assert_eq!(&txt.txt_data[0][..], b"v=dmp1;t=identity;data");
         } else {
             panic!("expected RData::TXT");
         }
@@ -597,17 +594,15 @@ mod tests {
             .build_publish_message("alice.example.com", "value", 60)
             .unwrap();
         let signer = writer.tsig_key.to_signer(writer.fudge_secs).unwrap();
-        msg.finalize(signer.as_ref(), 1_700_000_000).unwrap();
+        msg.finalize(&signer, 1_700_000_000).unwrap();
 
         let bytes = msg.to_vec().unwrap();
         let parsed = Message::from_vec(&bytes).unwrap();
-        let tsigs = parsed.signature();
-        assert_eq!(tsigs.len(), 1, "expected one TSIG record");
-        if let RData::DNSSEC(hickory_proto::dnssec::rdata::DNSSECRData::TSIG(t)) = tsigs[0].data() {
-            assert!(!t.mac().is_empty(), "TSIG MAC must be non-empty");
-            assert_eq!(t.mac().len(), 32, "HMAC-SHA256 MAC is 32 bytes");
-        } else {
-            panic!("expected RData::DNSSEC(TSIG)");
-        }
+        // 0.26 types the signature slot as Option<Record<TSIG>>, so the TSIG
+        // record no longer has to be dug out of a generic RData.
+        let tsig_record = parsed.signature.as_ref().expect("expected one TSIG record");
+        let t = &tsig_record.data;
+        assert!(!t.mac.is_empty(), "TSIG MAC must be non-empty");
+        assert_eq!(t.mac.len(), 32, "HMAC-SHA256 MAC is 32 bytes");
     }
 }

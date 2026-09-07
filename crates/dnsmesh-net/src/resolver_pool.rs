@@ -18,11 +18,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
-use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::proto::xfer::Protocol;
-use hickory_resolver::proto::ProtoErrorKind;
-use hickory_resolver::{ResolveErrorKind, Resolver};
+use hickory_net::runtime::TokioRuntimeProvider;
+use hickory_net::{DnsError, NetError as HickoryNetError};
+use hickory_proto::serialize::binary::DecodeError;
+use hickory_proto::ProtoError;
+use hickory_resolver::config::{ConnectionConfig, NameServerConfig, ResolverConfig, ResolverOpts};
+use hickory_resolver::{Resolver, TokioResolver};
 use parking_lot::Mutex;
 
 use crate::base::DnsRecordReader;
@@ -110,7 +111,7 @@ struct HostState {
     ip: IpAddr,
     #[allow(dead_code)]
     port: u16,
-    resolver: Resolver<TokioConnectionProvider>,
+    resolver: TokioResolver,
     health: Mutex<HostHealth>,
 }
 
@@ -179,24 +180,28 @@ impl ResolverPool {
         let mut states: Vec<Arc<HostState>> = Vec::new();
         for spec in hosts {
             let (ip, port) = spec.resolve(config.port);
-            let mut cfg = ResolverConfig::new();
-            cfg.add_name_server(NameServerConfig::new(
-                std::net::SocketAddr::new(ip, port),
-                Protocol::Udp,
-            ));
-            cfg.add_name_server(NameServerConfig::new(
-                std::net::SocketAddr::new(ip, port),
-                Protocol::Tcp,
-            ));
+            // 0.26 groups transports under one name server instead of listing the
+            // same host once per protocol. `trust_negative_responses: true` keeps
+            // the 0.25 default that `NameServerConfig::new` used to apply.
+            let mut udp = ConnectionConfig::udp();
+            udp.port = port;
+            let mut tcp = ConnectionConfig::tcp();
+            tcp.port = port;
+            let cfg = ResolverConfig::from_name_servers(vec![NameServerConfig::new(
+                ip,
+                true,
+                vec![udp, tcp],
+            )]);
             let mut opts = ResolverOpts::default();
             opts.timeout = config.timeout;
             opts.attempts = 2;
             opts.use_hosts_file = hickory_resolver::config::ResolveHosts::Never;
             opts.cache_size = 0;
-            let mut builder =
-                Resolver::builder_with_config(cfg, TokioConnectionProvider::default());
+            let mut builder = Resolver::builder_with_config(cfg, TokioRuntimeProvider::default());
             *builder.options_mut() = opts;
-            let resolver = builder.build();
+            let resolver = builder.build().map_err(|e| {
+                NetError::InvalidConfig(format!("resolver setup failed for {ip}: {e}"))
+            })?;
             states.push(Arc::new(HostState {
                 ip,
                 port,
@@ -330,9 +335,12 @@ async fn query_one(state: &HostState, name: &str) -> HostOutcome {
     match state.resolver.txt_lookup(name).await {
         Ok(lookup) => {
             let mut out: Vec<String> = Vec::new();
-            for txt in lookup.iter() {
+            for record in lookup.answers() {
+                let hickory_proto::rr::RData::TXT(txt) = &record.data else {
+                    continue;
+                };
                 let mut joined = String::new();
-                for chunk in txt.txt_data() {
+                for chunk in &txt.txt_data {
                     // TXT data is bytes-on-wire; DMP records are always ASCII /
                     // UTF-8 with the literal `v=dmp1;...` prefix. Lossy decode
                     // is fine — non-UTF-8 records aren't ours.
@@ -352,7 +360,7 @@ async fn query_one(state: &HostState, name: &str) -> HostOutcome {
     }
 }
 
-fn classify_error(err: &hickory_resolver::ResolveError) -> HostOutcome {
+fn classify_error(err: &HickoryNetError) -> HostOutcome {
     // Three buckets:
     // - `NoRecordsFound` (NXDOMAIN/NoAnswer) — authoritative "no such record",
     //   provisionally healthy.
@@ -360,16 +368,14 @@ fn classify_error(err: &hickory_resolver::ResolveError) -> HostOutcome {
     //   malformed; surface as `BadName` so we don't poison resolver health on
     //   a typo.
     // - Everything else — transport-level fault.
-    match err.kind() {
-        ResolveErrorKind::Proto(proto) => match proto.kind() {
-            ProtoErrorKind::NoRecordsFound { .. } => HostOutcome::NotFound,
-            ProtoErrorKind::DomainNameTooLong(_)
-            | ProtoErrorKind::LabelBytesTooLong(_)
-            | ProtoErrorKind::CharacterDataTooLong { .. } => {
-                HostOutcome::BadName(proto.kind().to_string())
-            }
-            _ => HostOutcome::Transport,
-        },
+    match err {
+        HickoryNetError::Dns(DnsError::NoRecordsFound(_)) => HostOutcome::NotFound,
+        HickoryNetError::Proto(
+            ProtoError::Decode(
+                DecodeError::DomainNameTooLong(_) | DecodeError::LabelBytesTooLong(_),
+            )
+            | ProtoError::CharacterDataTooLong { .. },
+        ) => HostOutcome::BadName(err.to_string()),
         _ => HostOutcome::Transport,
     }
 }
