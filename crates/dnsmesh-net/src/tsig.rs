@@ -2,7 +2,7 @@
 //!
 //! Mirrors the slice of `dmp/network/dns_update_writer.py` that touches
 //! TSIG: a key (name + algorithm + secret) plus the helpers to plug it
-//! into `hickory-proto`'s [`hickory_proto::dnssec::tsig::TSigner`] at
+//! into `hickory-proto`'s [`hickory_proto::rr::TSigner`] at
 //! the layer where the DNS UPDATE writer signs messages.
 //!
 //! RFC 8945 lists nine algorithm names; we expose only the three that
@@ -17,11 +17,9 @@
 //! support truncated HMACs (see `dnssec/tsig.rs` in hickory-proto), and
 //! emitting them without verification would be asymmetric.
 
-use std::sync::Arc;
-
-use hickory_proto::dnssec::rdata::tsig::TsigAlgorithm as HickoryTsigAlgorithm;
-use hickory_proto::dnssec::tsig::TSigner;
+use hickory_proto::rr::rdata::tsig::TsigAlgorithm as HickoryTsigAlgorithm;
 use hickory_proto::rr::Name;
+use hickory_proto::rr::TSigner;
 use zeroize::Zeroizing;
 
 /// RFC 8945 algorithm name for HMAC-SHA256.
@@ -183,19 +181,16 @@ impl TsigKey {
     }
 
     /// Build a hickory `TSigner` ready to plug into a UDP / TCP client
-    /// stream as a [`hickory_proto::op::MessageFinalizer`].
+    /// stream as a [`TSigner`].
     ///
-    /// Wraps in `Arc<dyn MessageFinalizer>` because that's the type
+    /// Wraps in `Arc<dyn MessageSigner>` because that's the type
     /// `UdpClientStream::with_signer` and `Client::new` accept.
     ///
     /// Returns `TsigError::SignerInit` if hickory rejects the key (the
     /// most common reason in practice is a feature-flag mismatch — the
     /// `dnssec-aws-lc-rs` feature must be enabled, which our Cargo.toml
     /// already requires).
-    pub fn to_signer(
-        &self,
-        fudge_secs: u16,
-    ) -> Result<Arc<dyn hickory_proto::op::MessageFinalizer>, TsigError> {
+    pub fn to_signer(&self, fudge_secs: u16) -> Result<TSigner, TsigError> {
         let key_name = Name::from_ascii(&self.name).map_err(|e| TsigError::InvalidKeyName {
             name: self.name.clone(),
             reason: e.to_string(),
@@ -207,7 +202,7 @@ impl TsigKey {
             fudge_secs,
         )
         .map_err(|e| TsigError::SignerInit(e.to_string()))?;
-        Ok(Arc::new(signer))
+        Ok(signer)
     }
 }
 
@@ -340,23 +335,21 @@ mod tests {
         let signer = key
             .to_signer(DEFAULT_FUDGE_SECS)
             .expect("hickory should accept the key with the dnssec-aws-lc-rs feature on");
-        // We can't introspect the Arc<dyn MessageFinalizer> directly, but
+        // We can't introspect the Arc<dyn MessageSigner> directly, but
         // we can finalize a real message with it and confirm the TSIG RR
-        // shows up.
-        let mut msg = Message::new();
+        // shows up. 0.26 models the signature as an enum, so "exactly one
+        // TSIG record" is now structural rather than a length assertion.
+        let mut msg = Message::new(
+            0,
+            hickory_proto::op::MessageType::Query,
+            hickory_proto::op::OpCode::Update,
+        );
         msg.add_query(Query::new());
-        msg.finalize(signer.as_ref(), 0).unwrap();
-        let tsig_records = msg.signature();
-        assert_eq!(tsig_records.len(), 1, "expected exactly one TSIG record");
+        msg.finalize(&signer, 0).unwrap();
         // sanity: the MAC inside is non-empty (HMAC-SHA256 = 32 bytes).
-        if let hickory_proto::rr::RData::DNSSEC(hickory_proto::dnssec::rdata::DNSSECRData::TSIG(
-            tsig,
-        )) = tsig_records[0].data()
-        {
-            assert!(!tsig.mac().is_empty());
-            assert!(tsig.mac().len() >= 32);
-        } else {
-            panic!("expected TSIG RData");
-        }
+        let tsig_record = msg.signature.as_ref().expect("expected a TSIG signature");
+        let tsig = &tsig_record.data;
+        assert!(!tsig.mac.is_empty());
+        assert!(tsig.mac.len() >= 32);
     }
 }
