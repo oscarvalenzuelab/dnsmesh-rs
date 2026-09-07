@@ -168,7 +168,9 @@ impl DmpClient {
     ///
     /// The `async` here is API-stable scaffolding for the eventual move to
     /// `spawn_blocking` for the sqlite write.
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn add_contact(&self, contact: Contact) -> Result<bool, ClientError> {
         let existing = self.contacts.get_contact(&contact.username)?;
         let newly_added = existing.is_none();
@@ -186,7 +188,9 @@ impl DmpClient {
     ///
     /// The `async` here is API-stable scaffolding for the eventual move to
     /// `spawn_blocking` for the sqlite read.
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn list_contacts(&self) -> Result<Vec<Contact>, ClientError> {
         let stored = self.contacts.list_contacts()?;
         Ok(stored.into_iter().map(Contact::from_stored).collect())

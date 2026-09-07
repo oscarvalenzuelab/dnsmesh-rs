@@ -33,7 +33,9 @@ impl DmpClient {
     /// All pending intros, newest first.
     ///
     /// `async` is API-stable scaffolding; the body is currently sync.
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn list_intros(&self) -> Result<Vec<PendingIntro>, ClientError> {
         Ok(self.intro_queue.list_pending()?)
     }
@@ -48,7 +50,9 @@ impl DmpClient {
     ///
     /// Returns `Ok(None)` if `intro_id` doesn't exist (or another
     /// caller already took it).
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn accept_intro(&self, intro_id: i64) -> Result<Option<DeliveredIntro>, ClientError> {
         let Some(intro) = self.intro_queue.take(intro_id)? else {
             return Ok(None);
@@ -112,7 +116,9 @@ impl DmpClient {
     ///
     /// Returns `true` if the row was actually removed (i.e. the
     /// `intro_id` was valid and the queue entry existed).
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn block_intro(&self, intro_id: i64, note: &str) -> Result<bool, ClientError> {
         let Some(intro) = self.intro_queue.get(intro_id)? else {
             return Ok(false);
