@@ -119,7 +119,9 @@ impl DmpClient {
     /// synchronous (Argon2id KDF + sqlite open) but a future revision is
     /// expected to run those on a blocking pool, and we don't want to break
     /// callers when that lands.
-    #[allow(clippy::unused_async)]
+    // unknown_lints keeps this compiling on toolchains older than the one that
+    // introduced unused_async_trait_impl (Rust 1.98).
+    #[allow(unknown_lints, clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn new(config: DmpClientConfig) -> Result<Self, ClientError> {
         if config.username.trim().is_empty() {
             return Err(ClientError::InvalidConfig(
