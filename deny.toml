@@ -6,15 +6,6 @@ yanked = "deny"
 # Each ignore documents why the advisory is suppressed and what the
 # path forward looks like. Refresh when upstream cuts a real fix.
 ignore = [
-    # Hickory NSEC3 closest-encloser proof — unbounded loop on
-    # cross-zone responses. As of advisory date (2026-05-01) no
-    # fixed version is published; the upstream PR is in flight
-    # against 0.26. dnsmesh-rs queries TXT records over UDP/TCP,
-    # not DNSSEC-validated zones, so the NSEC3 proof path is not
-    # on the hot path. Will drop once a stable hickory release
-    # with the fix lands on crates.io.
-    "RUSTSEC-2026-0118",
-
     # Hickory O(n^2) name compression on encode. Fix is in
     # 0.26.0-alpha.1 only; no stable >=0.26.1 published as of
     # this writing. Encoding paths run on names we control
